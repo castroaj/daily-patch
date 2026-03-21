@@ -41,7 +41,7 @@ jobs:
           tags: daily-patch/${{ matrix.service }}:${{ github.sha }}
 
       - name: Trivy SBOM scan (CycloneDX)
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: daily-patch/${{ matrix.service }}:${{ github.sha }}
           format: cyclonedx
@@ -57,7 +57,7 @@ jobs:
           retention-days: 90
 
       - name: Trivy SARIF scan (GitHub Security tab)
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: daily-patch/${{ matrix.service }}:${{ github.sha }}
           format: sarif
