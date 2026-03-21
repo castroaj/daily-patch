@@ -1,0 +1,160 @@
+# ci.yml — build, test, and lint all services on push and pull request
+#
+# A `changes` job detects which service directories were modified; each
+# service job is gated on that output so only affected services run.
+# Go jobs cache the module cache keyed on go.mod; Python jobs cache pip
+# keyed on requirements.txt. golangci-lint is installed via `make setup`.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      ingestion: ${{ steps.filter.outputs.ingestion }}
+      scorer: ${{ steps.filter.outputs.scorer }}
+      generator: ${{ steps.filter.outputs.generator }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'api/**'
+            ingestion:
+              - 'ingestion/**'
+            scorer:
+              - 'scorer/**'
+            generator:
+              - 'generator/**'
+
+  api:
+    name: api (Go)
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: false
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-api-${{ hashFiles('api/go.mod') }}
+          restore-keys: go-api-
+
+      - name: Install tools
+        run: make setup
+
+      - name: Build, test, lint
+        run: make build test lint
+
+  ingestion:
+    name: ingestion (Go)
+    needs: changes
+    if: needs.changes.outputs.ingestion == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ingestion/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: false
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-ingestion-${{ hashFiles('ingestion/go.mod') }}
+          restore-keys: go-ingestion-
+
+      - name: Install tools
+        run: make setup
+
+      - name: Build, test, lint
+        run: make build test lint
+
+  scorer:
+    name: scorer (Python)
+    needs: changes
+    if: needs.changes.outputs.scorer == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scorer/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-scorer-${{ hashFiles('scorer/requirements.txt') }}
+          restore-keys: pip-scorer-
+
+      - name: Install dependencies
+        run: make install
+
+      - name: Test
+        run: make test
+
+  generator:
+    name: generator (Python)
+    needs: changes
+    if: needs.changes.outputs.generator == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: generator/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-generator-${{ hashFiles('generator/requirements.txt') }}
+          restore-keys: pip-generator-
+
+      - name: Install dependencies
+        run: make install
+
+      - name: Test
+        run: make test
