@@ -16,12 +16,12 @@ A `changes` job runs first using `dorny/paths-filter` to detect which service di
 |-----|-----------|-------|
 | `api` | `api/**` changed | setup-go 1.23 → cache modules → `make setup` → `make build test lint` |
 | `ingestion` | `ingestion/**` changed | setup-go 1.23 → cache modules → `make setup` → `make build test lint` |
-| `scorer` | `scorer/**` changed | setup-python 3.12 → cache pip → `make install` → `make test` |
-| `generator` | `generator/**` changed | setup-python 3.12 → cache pip → `make install` → `make test` |
+| `scorer` | `scorer/**` changed | setup-python 3.12 → cache `.venv` → `make setup test` |
+| `generator` | `generator/**` changed | setup-python 3.12 → cache `.venv` → `make setup test` |
 
 **Caching:**
 - Go jobs cache `~/.cache/go-build` and `~/go/pkg/mod`, keyed on `<service>/go.mod`.
-- Python jobs cache `~/.cache/pip`, keyed on `<service>/requirements.txt`.
+- Python jobs cache the service `.venv` directory, keyed on `<service>/requirements.txt`.
 
 **Linting:** `make setup` installs `golangci-lint` at the pinned version defined in each Go service's Makefile before `make lint` runs.
 
