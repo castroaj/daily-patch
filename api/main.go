@@ -14,7 +14,9 @@ import (
 func main() {
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "api"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "api"}); err != nil {
+			log.Println("Failed request")
+		}
 	})
 
 	log.Println("api listening on :8080")
