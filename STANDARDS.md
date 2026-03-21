@@ -132,9 +132,9 @@ Three groups separated by blank lines, in order:
 - All runtime and dev dependencies declared in `requirements.txt`
 - Never install packages globally; always run inside the service `.venv` created
   by `make setup`
-- Do not pin to exact patch versions in `requirements.txt` unless a specific
-  version is required to avoid a known bug; use unpinned or minor-pinned names
-  (`anthropic`, not `anthropic==0.72.0`)
+- Pin all dependencies to exact versions in `requirements.txt` (`anthropic==0.72.0`,
+  not `anthropic`). Update versions deliberately and regenerate the full pin list
+  via `pip freeze` after testing.
 
 ---
 

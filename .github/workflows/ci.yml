@@ -126,8 +126,8 @@ jobs:
           key: venv-scorer-${{ hashFiles('scorer/requirements.txt') }}
           restore-keys: venv-scorer-
 
-      - name: Setup and test
-        run: make setup test
+      - name: Setup, test, lint
+        run: make setup test lint
 
   generator:
     name: generator (Python)
@@ -151,5 +151,5 @@ jobs:
           key: venv-generator-${{ hashFiles('generator/requirements.txt') }}
           restore-keys: venv-generator-
 
-      - name: Setup and test
-        run: make setup test
+      - name: Setup, test, lint
+        run: make setup test lint

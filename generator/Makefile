@@ -1,13 +1,14 @@
 # Makefile — build targets for the generator service
 #
-# Targets: setup, run, test, docker-build, clean
+# Targets: setup, run, test, lint, docker-build, clean
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 PYTEST := $(VENV)/bin/pytest
+RUFF := $(VENV)/bin/ruff
 
-.PHONY: setup run test docker-build clean
+.PHONY: setup run test lint docker-build clean
 
 setup: $(VENV)/bin/activate
 
@@ -21,6 +22,10 @@ run: setup
 
 test: setup
 	$(PYTEST)
+
+lint: setup
+	$(RUFF) check .
+	$(RUFF) format --check .
 
 docker-build:
 	docker build -t daily-patch/generator .
