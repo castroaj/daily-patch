@@ -1,0 +1,54 @@
+# config.yaml — shared configuration for all daily-patch services
+#
+# Mounted into every container at /app/config.yaml. Secrets are never stored
+# here — they are injected via environment variables at runtime. Copy
+# .env.example to .env and populate it before running the stack.
+
+schedule:
+  ingestion: "0 5 * * *"       # cron expression (runs at 05:00 daily)
+  newsletter: "0 6 * * *"      # cron expression (runs at 06:00 daily)
+
+sources:
+  nvd:
+    enabled: true
+    api_key: ""                 # from env: NVD_API_KEY
+  github:
+    enabled: true
+    token: ""                   # from env: GITHUB_TOKEN
+  exploitdb:
+    enabled: true
+    feed_url: ""                # CSV dump URL or RSS feed URL
+
+database:
+  dsn: ""                       # from env: DATABASE_URL
+
+api:
+  listen: ":8080"
+  internal_secret: ""           # from env: API_INTERNAL_SECRET
+
+interests:
+  prose: |
+    I care about Linux kernel CVEs, authentication bypass vulnerabilities,
+    memory safety issues in C/C++ projects, and anything with a public PoC.
+  filters:
+    min_cvss: 6.0
+    vendors: []                 # e.g. ["microsoft", "cisco"]
+    products: []                # e.g. ["openssl", "linux kernel"]
+    cwes: []                    # e.g. ["CWE-79", "CWE-89"]
+    keywords: []                # e.g. ["remote code execution", "zero-day"]
+
+llm:
+  provider: anthropic
+  model: claude-opus-4-6
+  max_tokens: 1024
+
+delivery:
+  html:
+    output_path: "/output/daily-patch.html"
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    from_address: ""
+    to_addresses: []
+    ses_region: ""              # set to use SES instead of SMTP (e.g. "us-east-1")

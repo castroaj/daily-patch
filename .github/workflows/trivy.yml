@@ -1,0 +1,72 @@
+# trivy.yml — Trivy image scan producing an SBOM with vulnerability and
+#             misconfiguration findings for each service image
+#
+# Runs on every PR targeting main and on pushes to main. Each service image
+# is built locally (load: true) then scanned with Trivy in CycloneDX SBOM
+# format. Results are uploaded as workflow artifacts and to the GitHub
+# Security tab via SARIF.
+
+name: Trivy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  scan:
+    name: Scan ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, ingestion, scorer, generator]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.service }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service }}/
+          push: false
+          load: true
+          tags: daily-patch/${{ matrix.service }}:${{ github.sha }}
+
+      - name: Trivy SBOM scan (CycloneDX)
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: daily-patch/${{ matrix.service }}:${{ github.sha }}
+          format: cyclonedx
+          scanners: vuln,misconfig
+          output: trivy-sbom-${{ matrix.service }}.cdx.json
+          exit-code: "0"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.service }}
+          path: trivy-sbom-${{ matrix.service }}.cdx.json
+          retention-days: 90
+
+      - name: Trivy SARIF scan (GitHub Security tab)
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: daily-patch/${{ matrix.service }}:${{ github.sha }}
+          format: sarif
+          scanners: vuln,misconfig
+          output: trivy-results-${{ matrix.service }}.sarif
+          exit-code: "0"
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results-${{ matrix.service }}.sarif
+          category: trivy-${{ matrix.service }}

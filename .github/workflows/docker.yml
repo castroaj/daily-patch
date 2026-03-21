@@ -1,0 +1,137 @@
+# docker.yml — build Docker images for all services
+#
+# Validates each Dockerfile using BuildKit. Images are built but not pushed;
+# a commented-out push block is provided as the extension point for future
+# ghcr.io publishing once a deployment milestone is reached.
+
+name: Docker
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-api:
+    name: Build api image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build api
+        uses: docker/build-push-action@v6
+        with:
+          context: api/
+          push: false
+          tags: daily-patch/api:${{ github.sha }}
+
+      # --- Extension point: push to ghcr.io ---
+      # Uncomment and configure when ready to publish images.
+      #
+      # - uses: docker/login-action@v3
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+      #
+      # - name: Push api
+      #   uses: docker/build-push-action@v6
+      #   with:
+      #     context: api/
+      #     push: true
+      #     tags: ghcr.io/${{ github.repository_owner }}/daily-patch-api:latest
+
+  build-ingestion:
+    name: Build ingestion image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ingestion
+        uses: docker/build-push-action@v6
+        with:
+          context: ingestion/
+          push: false
+          tags: daily-patch/ingestion:${{ github.sha }}
+
+      # --- Extension point: push to ghcr.io ---
+      #
+      # - uses: docker/login-action@v3
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+      #
+      # - name: Push ingestion
+      #   uses: docker/build-push-action@v6
+      #   with:
+      #     context: ingestion/
+      #     push: true
+      #     tags: ghcr.io/${{ github.repository_owner }}/daily-patch-ingestion:latest
+
+  build-scorer:
+    name: Build scorer image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build scorer
+        uses: docker/build-push-action@v6
+        with:
+          context: scorer/
+          push: false
+          tags: daily-patch/scorer:${{ github.sha }}
+
+      # --- Extension point: push to ghcr.io ---
+      #
+      # - uses: docker/login-action@v3
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+      #
+      # - name: Push scorer
+      #   uses: docker/build-push-action@v6
+      #   with:
+      #     context: scorer/
+      #     push: true
+      #     tags: ghcr.io/${{ github.repository_owner }}/daily-patch-scorer:latest
+
+  build-generator:
+    name: Build generator image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build generator
+        uses: docker/build-push-action@v6
+        with:
+          context: generator/
+          push: false
+          tags: daily-patch/generator:${{ github.sha }}
+
+      # --- Extension point: push to ghcr.io ---
+      #
+      # - uses: docker/login-action@v3
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+      #
+      # - name: Push generator
+      #   uses: docker/build-push-action@v6
+      #   with:
+      #     context: generator/
+      #     push: true
+      #     tags: ghcr.io/${{ github.repository_owner }}/daily-patch-generator:latest
