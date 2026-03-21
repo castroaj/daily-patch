@@ -72,20 +72,5 @@ services:
     depends_on:
       - api
 
-  scheduler:
-    image: mcuadros/ofelia:latest
-    command: daemon --docker
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    depends_on:
-      - api
-    labels:
-      ofelia.job-run.ingestion.schedule: "@daily"
-      ofelia.job-run.ingestion.container: "daily-patch-ingestion-1"
-      ofelia.job-run.scorer.schedule: "@daily"
-      ofelia.job-run.scorer.container: "daily-patch-scorer-1"
-      ofelia.job-run.generator.schedule: "@daily"
-      ofelia.job-run.generator.container: "daily-patch-generator-1"
-
 volumes:
   postgres_data:
