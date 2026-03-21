@@ -4,7 +4,7 @@
 # build/test/lint/clean; Python services (scorer, generator) support
 # install/run/test/clean. Docker Compose targets manage the full stack.
 
-.PHONY: build test lint up down clean
+.PHONY: build test lint up down clean setup
 
 # Build all Go service binaries
 build:
@@ -18,7 +18,7 @@ test:
 	$(MAKE) -C scorer test
 	$(MAKE) -C generator test
 
-# Lint all Go services (requires golangci-lint)
+# Lint all Go services; golangci-lint is installed automatically if missing
 lint:
 	$(MAKE) -C api lint
 	$(MAKE) -C ingestion lint
@@ -30,6 +30,11 @@ up:
 # Stop and remove containers
 down:
 	docker compose down
+
+# Install dev tools (golangci-lint) for all Go services
+setup:
+	$(MAKE) -C api setup
+	$(MAKE) -C ingestion setup
 
 # Remove all build artifacts and caches across every service
 clean:
