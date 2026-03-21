@@ -13,7 +13,7 @@
 
 ### Non-Goals (v1)
 
-See [Section 8](#8-non-goals-v1).
+See [Section 9](#9-non-goals-v1).
 
 ---
 
@@ -333,7 +333,29 @@ Cron expressions are defined in `config.yaml` under `schedule.*` and referenced 
 
 ---
 
-## 8. Non-Goals (v1)
+## 8. File Header Standard
+
+Every source file begins with a header comment using the file's native comment character:
+
+```
+<comment> <filename> — <one-line description>
+<comment>
+<comment> <optional additional context>
+```
+
+| File type | Comment character |
+|-----------|-------------------|
+| Go | `//` |
+| Python | `#` |
+| Makefile | `#` |
+| Dockerfile | `#` |
+| YAML | `#` |
+
+See `CLAUDE.md` for full examples and guidance.
+
+---
+
+## 9. Non-Goals (v1)
 
 The following are explicitly out of scope for the initial version:
 

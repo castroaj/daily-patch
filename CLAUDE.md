@@ -96,3 +96,48 @@ Migrations live in `db/migrations/` and are managed via `golang-migrate`. They a
 - Service-to-service calls include `X-Internal-Secret` header
 - The scoring service writes results via `POST /api/v1/vulns/{id}/scores`
 - The ingestion service creates records via `POST /api/v1/vulns` and updates via `PUT /api/v1/vulns/{id}`
+
+## File Header Standard
+
+Every source file in this repository must begin with a file header comment. Use the native comment character for the file type.
+
+**Format:**
+```
+<comment> <filename> — <one-line description of the file's purpose>
+<comment>
+<comment> <optional additional context, wrapped at 80 characters>
+```
+
+**Comment characters by file type:**
+
+| File type | Character |
+|-----------|-----------|
+| Go (`.go`) | `//` |
+| Python (`.py`) | `#` |
+| Makefile | `#` |
+| Dockerfile | `#` |
+| YAML (`.yaml`, `.yml`) | `#` |
+
+**Examples:**
+
+```go
+// main.go — entry point for the api service
+//
+// Starts a minimal net/http server on :8080. The /health endpoint is used
+// by Docker Compose for readiness checks.
+```
+
+```python
+# __main__.py — entry point for the scorer package
+#
+# Invoked via `python -m scorer`. Fetches unscored vulnerabilities from the
+# API, runs them through the LLM scoring pipeline, and posts results back.
+```
+
+```makefile
+# Makefile — build targets for the api service
+#
+# Targets: build, test, lint, run, docker-build, clean
+```
+
+The description should answer "what is this file and why does it exist?" in one line, with optional follow-up sentences for non-obvious context.

@@ -1,3 +1,7 @@
+# Makefile — build targets for the api service
+#
+# Targets: build, test, lint, run, docker-build, clean
+
 .PHONY: build test lint run docker-build clean
 
 build:

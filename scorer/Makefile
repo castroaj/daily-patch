@@ -1,3 +1,7 @@
+# Makefile — build targets for the scorer service
+#
+# Targets: install, run, test, docker-build, clean
+
 .PHONY: install run test docker-build clean
 
 install:

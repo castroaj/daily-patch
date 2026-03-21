@@ -1,3 +1,8 @@
+// main.go — entry point for the api service
+//
+// Starts a minimal net/http server on :8080. The /health endpoint is used
+// by Docker Compose for readiness checks.
+
 package main
 
 import (
