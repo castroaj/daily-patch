@@ -1,0 +1,91 @@
+# docker-compose.yml — full stack definition for daily-patch
+#
+# Defines five services: postgres, api, ingestion, scorer, generator, and the
+# Ofelia scheduler. Non-API services are one-shot (restart: "no"). All services
+# share config.yaml via a bind mount. Secrets are loaded from .env.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: daily_patch
+      POSTGRES_USER: daily_patch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U daily_patch"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./api
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      API_INTERNAL_SECRET: ${API_INTERNAL_SECRET}
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ingestion:
+    build:
+      context: ./ingestion
+    restart: "no"
+    environment:
+      API_INTERNAL_SECRET: ${API_INTERNAL_SECRET}
+      NVD_API_KEY: ${NVD_API_KEY}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    depends_on:
+      - api
+
+  scorer:
+    build:
+      context: ./scorer
+    restart: "no"
+    environment:
+      API_INTERNAL_SECRET: ${API_INTERNAL_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    depends_on:
+      - api
+
+  generator:
+    build:
+      context: ./generator
+    restart: "no"
+    environment:
+      API_INTERNAL_SECRET: ${API_INTERNAL_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./output:/output
+    depends_on:
+      - api
+
+  scheduler:
+    image: mcuadros/ofelia:latest
+    command: daemon --docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - api
+    labels:
+      ofelia.job-run.ingestion.schedule: "@daily"
+      ofelia.job-run.ingestion.container: "daily-patch-ingestion-1"
+      ofelia.job-run.scorer.schedule: "@daily"
+      ofelia.job-run.scorer.container: "daily-patch-scorer-1"
+      ofelia.job-run.generator.schedule: "@daily"
+      ofelia.job-run.generator.container: "daily-patch-generator-1"
+
+volumes:
+  postgres_data:
