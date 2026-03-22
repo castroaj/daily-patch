@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
 // SourceType identifies which upstream feed a vulnerability came from.
 // Values must match the CHECK constraint on the vulnerabilities and
 // ingestion_runs tables.
@@ -20,6 +24,10 @@ const (
 	SourceGHSA      SourceType = "ghsa"
 	SourceExploitDB SourceType = "exploitdb"
 )
+
+// -----------------------------------------------------------------------------
+// Public types
+// -----------------------------------------------------------------------------
 
 // Vulnerability is the normalized representation of a single advisory record.
 // Only fields with dedicated database columns are promoted to struct fields;
