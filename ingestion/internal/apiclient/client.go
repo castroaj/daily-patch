@@ -29,6 +29,13 @@ const DefaultTimeout = 30 * time.Second
 // maxRetries is the number of attempts before giving up on a transient error.
 const maxRetries = 3
 
+// Query parameter keys used when building vuln lookup requests.
+const (
+	paramCVEID  = "cve_id"
+	paramGHSAID = "ghsa_id"
+	paramEDBID  = "edb_id"
+)
+
 // -----------------------------------------------------------------------------
 // Public types
 // -----------------------------------------------------------------------------
@@ -79,8 +86,9 @@ func New(baseURL, secret string, timeout time.Duration) (APIClient, error) {
 	}
 
 	return &httpClient{
-		baseURL: baseURL,
-		secret:  secret,
+		baseURL:    baseURL,
+		secret:     secret,
+		retryDelay: 500 * time.Millisecond,
 		http: &http.Client{
 			Timeout: timeout,
 		},
@@ -93,22 +101,23 @@ func New(baseURL, secret string, timeout time.Duration) (APIClient, error) {
 
 // httpClient is the production implementation of APIClient.
 type httpClient struct {
-	baseURL string
-	secret  string
-	http    *http.Client
+	baseURL    string
+	secret     string
+	http       *http.Client
+	retryDelay time.Duration // base delay between retries; tests set this to 0
 }
 
 // CheckExists queries GET /api/v1/vulns with canonical ID query parameters.
 func (c *httpClient) CheckExists(ctx context.Context, cveID, ghsaID, edbID string) (string, bool, error) {
 	q := url.Values{}
 	if cveID != "" {
-		q.Set("cve_id", cveID)
+		q.Set(paramCVEID, cveID)
 	}
 	if ghsaID != "" {
-		q.Set("ghsa_id", ghsaID)
+		q.Set(paramGHSAID, ghsaID)
 	}
 	if edbID != "" {
-		q.Set("edb_id", edbID)
+		q.Set(paramEDBID, edbID)
 	}
 
 	var result struct {
@@ -196,7 +205,7 @@ func (c *httpClient) do(ctx context.Context, method, path string, body interface
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			wait := time.Duration(math.Pow(2, float64(attempt))) * 500 * time.Millisecond
+			wait := time.Duration(math.Pow(2, float64(attempt))) * c.retryDelay
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -232,6 +241,11 @@ func (c *httpClient) do(ctx context.Context, method, path string, body interface
 		if err != nil {
 			lastErr = err
 			continue
+		}
+
+		if resp.StatusCode == http.StatusUnauthorized {
+			resp.Body.Close()
+			return nil, fmt.Errorf("unauthorized: verify X-Internal-Secret")
 		}
 
 		if resp.StatusCode >= 500 {
