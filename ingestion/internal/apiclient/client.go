@@ -53,7 +53,7 @@ type APIClient interface {
 	// Exactly one of cveID, ghsaID, edbID should be non-empty, though the
 	// implementation passes all non-empty values so the API can match on any.
 	// Returns the API-assigned UUID if a record is found.
-	CheckExists(ctx context.Context, cveID, ghsaID, edbID string) (id string, found bool, err error)
+	CheckExists(ctx context.Context, cveID string, ghsaID string, edbID string) (id string, found bool, err error)
 
 	// CreateVuln posts a new vulnerability record and returns the assigned UUID.
 	CreateVuln(ctx context.Context, v types.Vulnerability) (id string, err error)
@@ -78,7 +78,7 @@ type APIClient interface {
 // secret is sent as the X-Internal-Secret header on every request.
 // timeout sets the per-request deadline; pass DefaultTimeout if unsure.
 // Returns an error if baseURL or secret fail validation.
-func New(baseURL, secret string, timeout time.Duration) (APIClient, error) {
+func New(baseURL string, secret string, timeout time.Duration) (APIClient, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return nil, fmt.Errorf("invalid baseURL %q: must be an absolute http or https URL", baseURL)
@@ -105,11 +105,11 @@ func New(baseURL, secret string, timeout time.Duration) (APIClient, error) {
 // Private types and methods
 // -----------------------------------------------------------------------------
 
-// checkExistsResponse is the decoded body returned by GET /api/v1/vulns.
+// checkExistsResponse is the decoded body returned by GET /api/v1/vulns?{canonical_id}=...
+// The endpoint returns a single object (not a list) because canonical IDs are
+// UNIQUE in the database. A missing record is signalled by a 404, not an empty list.
 type checkExistsResponse struct {
-	Data []struct {
-		ID string `json:"id"`
-	} `json:"data"`
+	ID string `json:"id"`
 }
 
 // createVulnResponse is the decoded body returned by POST /api/v1/vulns.
@@ -134,7 +134,7 @@ type httpClient struct {
 }
 
 // CheckExists queries GET /api/v1/vulns with canonical ID query parameters.
-func (c *httpClient) CheckExists(ctx context.Context, cveID, ghsaID, edbID string) (string, bool, error) {
+func (c *httpClient) CheckExists(ctx context.Context, cveID string, ghsaID string, edbID string) (string, bool, error) {
 	q := url.Values{}
 	if cveID != "" {
 		q.Set(paramCVEID, cveID)
@@ -151,10 +151,10 @@ func (c *httpClient) CheckExists(ctx context.Context, cveID, ghsaID, edbID strin
 	if err != nil {
 		return "", false, err
 	}
-	if resp.StatusCode == http.StatusNotFound || len(result.Data) == 0 {
+	if resp.StatusCode == http.StatusNotFound {
 		return "", false, nil
 	}
-	return result.Data[0].ID, true, nil
+	return result.ID, true, nil
 }
 
 // CreateVuln posts a new vulnerability record to POST /api/v1/vulns.
@@ -270,7 +270,7 @@ func (c *httpClient) do(ctx context.Context, method, path string, body interface
 			continue
 		}
 
-		if dst != nil {
+		if dst != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			defer resp.Body.Close()
 			if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
 				return resp, fmt.Errorf("decode response: %w", err)

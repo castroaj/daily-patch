@@ -156,13 +156,8 @@ func TestCheckExists_StatusCodes(t *testing.T) {
 			wantFound: true,
 		},
 		{
-			name:      "200 empty data returns not found",
-			handler:   requireSecret(secret, vulnEmpty(http.StatusOK)),
-			wantFound: false,
-		},
-		{
 			name:      "404 returns not found without error",
-			handler:   requireSecret(secret, vulnEmpty(http.StatusNotFound)),
+			handler:   requireSecret(secret, vulnNotFound()),
 			wantFound: false,
 		},
 		{
@@ -206,28 +201,6 @@ func TestCheckExists_StatusCodes(t *testing.T) {
 
 func TestCheckExists_Payload(t *testing.T) {
 	const secret = "test-secret"
-
-	t.Run("returns first record id when multiple records present", func(t *testing.T) {
-		handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
-			type row struct {
-				ID string `json:"id"`
-			}
-			respond(w, http.StatusOK, map[string]any{
-				"data": []row{{ID: "first-uuid"}, {ID: "second-uuid"}},
-			})
-		})
-		c := startServer(t, secret, handler)
-		id, found, err := c.CheckExists(context.Background(), "CVE-2024-0001", "", "")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !found {
-			t.Fatal("want found=true")
-		}
-		if id != "first-uuid" {
-			t.Errorf("id = %q, want %q", id, "first-uuid")
-		}
-	})
 
 	t.Run("malformed JSON returns error", func(t *testing.T) {
 		handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
@@ -297,7 +270,7 @@ func TestCheckExists_QueryParams(t *testing.T) {
 
 			handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
 				capturedQuery = map[string][]string(r.URL.Query())
-				respond(w, http.StatusOK, map[string]any{"data": []any{}})
+				w.WriteHeader(http.StatusNotFound)
 			})
 
 			c := startServer(t, secret, handler)
@@ -348,7 +321,7 @@ func TestCheckExists_Authorization(t *testing.T) {
 
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			capturedSecret = r.Header.Get("X-Internal-Secret")
-			respond(w, http.StatusOK, map[string]any{"data": []any{}})
+			w.WriteHeader(http.StatusNotFound)
 		}
 
 		c := startServer(t, secret, handler)
@@ -368,8 +341,8 @@ func TestCheckExists_Authorization(t *testing.T) {
 func TestCheckExists_AllIDsEmpty(t *testing.T) {
 	const secret = "test-secret"
 
-	t.Run("server 200 empty data is passed through", func(t *testing.T) {
-		c := startServer(t, secret, requireSecret(secret, vulnEmpty(http.StatusOK)))
+	t.Run("server 404 is passed through as not found", func(t *testing.T) {
+		c := startServer(t, secret, requireSecret(secret, vulnNotFound()))
 		id, found, err := c.CheckExists(context.Background(), "", "", "")
 		if err != nil {
 			t.Fatalf("client must not error on empty IDs, got: %v", err)
@@ -384,9 +357,8 @@ func TestCheckExists_AllIDsEmpty(t *testing.T) {
 			respond(w, http.StatusBadRequest, map[string]string{"error": "at least one id required"})
 		})
 		c := startServer(t, secret, handler)
-		// 400 is not retried and not treated specially by do(); it will attempt
-		// JSON decoding into the result struct, succeed with empty data, and
-		// return not-found. The client does not surface the 400 as an error.
+		// 400 is not retried and not treated specially by do(); the client does
+		// not surface it as an error.
 		_, _, err := c.CheckExists(context.Background(), "", "", "")
 		if err != nil {
 			t.Fatalf("client must not error on empty IDs, got: %v", err)
@@ -439,20 +411,16 @@ func requireSecret(secret string, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// vulnFound returns a handler that replies with a single matching vuln record.
+// vulnFound returns a handler that replies 200 with a single vuln object.
 func vulnFound(id string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		type row struct {
-			ID string `json:"id"`
-		}
-		respond(w, http.StatusOK, map[string]any{"data": []row{{ID: id}}})
+		respond(w, http.StatusOK, map[string]any{"id": id})
 	}
 }
 
-// vulnEmpty returns a handler that replies with the given status and an empty
-// data array.
-func vulnEmpty(status int) http.HandlerFunc {
+// vulnNotFound returns a handler that replies 404, signalling no matching record.
+func vulnNotFound() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		respond(w, status, map[string]any{"data": []any{}})
+		w.WriteHeader(http.StatusNotFound)
 	}
 }

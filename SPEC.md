@@ -77,7 +77,7 @@ The REST API is the **single source of truth interface** for all consumers. Post
 | GitHub Security Advisories | GraphQL cursor pagination | `updatedAt` cursor | GHSA-ID |
 | Exploit-DB | CSV dump or RSS feed | EDB-ID comparison | EDB-ID |
 
-**Deduplication:** before inserting, the ingestion service checks whether a record with the same canonical ID already exists by calling the REST API (`GET /api/v1/vulns?cve_id=...` or equivalent). If found, it issues a `PUT` to update; otherwise a `POST` to create.
+**Deduplication:** before inserting, the ingestion service checks whether a record with the same canonical ID already exists by calling the REST API (`GET /api/v1/vulns?cve_id=...` or equivalent). The endpoint returns a single object or 404 — not a list — because canonical IDs are `UNIQUE` in the database. If found, it issues a `PUT` to update; otherwise a `POST` to create.
 
 **Run recording:** each completed ingestion run (start time, finish time, items fetched, items new) is recorded via the API at the end of each source run.
 
@@ -96,6 +96,7 @@ The API service is the sole owner of the PostgreSQL connection pool. It exposes 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/v1/vulns` | List/filter vulnerabilities. Query params: `source`, `min_cvss`, `max_cvss`, `since`, `until`, `scored` |
+| `GET` | `/api/v1/vulns?cve_id={id}` | Look up a vulnerability by canonical ID. Also accepts `ghsa_id` or `edb_id`. Returns a single object or 404. Because `cve_id`, `ghsa_id`, and `edb_id` are `UNIQUE` in the database, these params are point lookups, not list filters — the response is a single vulnerability object, not a list. |
 | `GET` | `/api/v1/vulns/{id}` | Single vulnerability detail |
 | `POST` | `/api/v1/vulns` | Ingest a new vulnerability record (used by ingestion service) |
 | `PUT` | `/api/v1/vulns/{id}` | Update an existing vulnerability record |
@@ -207,6 +208,7 @@ CREATE TABLE newsletter_runs (
 
 **Notes:**
 - `cve_id`, `ghsa_id`, and `edb_id` are nullable because not every record has all identifiers (e.g. an Exploit-DB entry may reference a CVE, but a standalone PoC may not)
+- `cve_id`, `ghsa_id`, and `edb_id` carry `UNIQUE` constraints. This is a hard requirement, not a convenience index. The ingestion service deduplicates by querying `GET /api/v1/vulns?cve_id=...` (or equivalent) and relies on the guarantee that at most one record can match any canonical ID. Without these constraints a single real-world vulnerability ingested from multiple sources (e.g. NVD and GitHub Advisories) could produce duplicate records, causing it to be scored and delivered multiple times. **Never remove these constraints.**
 - `raw_json` stores the original source payload for auditability and future re-processing
 - `newsletter_run_id` on `scored_vulns` is set when a score is included in a newsletter run, enabling per-run reporting
 
