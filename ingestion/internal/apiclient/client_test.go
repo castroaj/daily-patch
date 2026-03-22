@@ -13,12 +13,15 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"daily-patch/ingestion/internal/types"
 )
 
 // -----------------------------------------------------------------------------
 // Constructor (New)
 // -----------------------------------------------------------------------------
 
+// TestNew_storesBaseURL asserts that New stores the provided base URL on the httpClient.
 func TestNew_storesBaseURL(t *testing.T) {
 	c, err := New("http://api:8080", "secret", DefaultTimeout)
 	if err != nil {
@@ -30,6 +33,7 @@ func TestNew_storesBaseURL(t *testing.T) {
 	}
 }
 
+// TestNew_storesSecret asserts that New stores the provided secret on the httpClient.
 func TestNew_storesSecret(t *testing.T) {
 	c, err := New("http://api:8080", "my-secret", DefaultTimeout)
 	if err != nil {
@@ -41,6 +45,7 @@ func TestNew_storesSecret(t *testing.T) {
 	}
 }
 
+// TestNew_appliesTimeout asserts that New wires the timeout duration into the underlying http.Client.
 func TestNew_appliesTimeout(t *testing.T) {
 	timeout := 10 * time.Second
 	c, err := New("http://api:8080", "secret", timeout)
@@ -53,14 +58,15 @@ func TestNew_appliesTimeout(t *testing.T) {
 	}
 }
 
+// TestNew_defaultTimeout asserts that DefaultTimeout is set to 30 seconds.
 func TestNew_defaultTimeout(t *testing.T) {
 	if DefaultTimeout != 30*time.Second {
 		t.Errorf("DefaultTimeout = %v, want 30s", DefaultTimeout)
 	}
 }
 
+// TestNew_implementsInterface asserts that New returns a value satisfying APIClient.
 func TestNew_implementsInterface(t *testing.T) {
-	// Compile-time assertion — if New stops returning APIClient this fails.
 	var _ APIClient
 	var err error
 	_, err = New("http://api:8080", "secret", DefaultTimeout)
@@ -69,6 +75,7 @@ func TestNew_implementsInterface(t *testing.T) {
 	}
 }
 
+// TestNew_invalidSecret asserts that New rejects secrets containing whitespace, non-ASCII, or control characters.
 func TestNew_invalidSecret(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -92,6 +99,7 @@ func TestNew_invalidSecret(t *testing.T) {
 	}
 }
 
+// TestNew_validSecret asserts that New accepts any non-empty string of printable ASCII characters as a secret.
 func TestNew_validSecret(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -113,6 +121,7 @@ func TestNew_validSecret(t *testing.T) {
 	}
 }
 
+// TestNew_invalidURL asserts that New rejects non-absolute URLs, non-http(s) schemes, and trailing slashes.
 func TestNew_invalidURL(t *testing.T) {
 	cases := []struct {
 		name string
@@ -139,6 +148,7 @@ func TestNew_invalidURL(t *testing.T) {
 // CheckExists
 // -----------------------------------------------------------------------------
 
+// TestCheckExists_StatusCodes asserts that CheckExists maps server status codes to the correct (id, found, err) return values.
 func TestCheckExists_StatusCodes(t *testing.T) {
 	const secret = "test-secret"
 
@@ -199,6 +209,7 @@ func TestCheckExists_StatusCodes(t *testing.T) {
 	}
 }
 
+// TestCheckExists_Payload asserts that the ID is decoded from the envelope's result field, not the envelope root.
 func TestCheckExists_Payload(t *testing.T) {
 	const secret = "test-secret"
 
@@ -216,8 +227,48 @@ func TestCheckExists_Payload(t *testing.T) {
 			t.Error("expected error for malformed JSON, got nil")
 		}
 	})
+
+	t.Run("id in result field is decoded", func(t *testing.T) {
+		handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+			respondEnvelope(w, http.StatusOK, map[string]any{"id": "result-id"})
+		})
+		c := startServer(t, secret, handler)
+		id, found, err := c.CheckExists(context.Background(), "CVE-2024-0001", "", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !found {
+			t.Error("expected found=true")
+		}
+		if id != "result-id" {
+			t.Errorf("id = %q, want %q", id, "result-id")
+		}
+	})
+
+	t.Run("id outside result field is not decoded", func(t *testing.T) {
+		// id is at the envelope root rather than inside result — must be ignored.
+		handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+			respond(w, http.StatusOK, map[string]any{
+				"error": "", "errorDetail": "", "statusCode": http.StatusOK,
+				"result": map[string]any{},
+				"id":     "should-not-be-decoded",
+			})
+		})
+		c := startServer(t, secret, handler)
+		id, found, err := c.CheckExists(context.Background(), "CVE-2024-0001", "", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !found {
+			t.Error("expected found=true (200 response)")
+		}
+		if id != "" {
+			t.Errorf("id = %q, want empty (id must come from result field)", id)
+		}
+	})
 }
 
+// TestCheckExists_QueryParams asserts that only non-empty canonical IDs are forwarded as query parameters and absent IDs are omitted.
 func TestCheckExists_QueryParams(t *testing.T) {
 	const secret = "test-secret"
 
@@ -293,6 +344,7 @@ func TestCheckExists_QueryParams(t *testing.T) {
 	}
 }
 
+// TestCheckExists_Authorization asserts that the configured secret is sent as X-Internal-Secret and that wrong secrets are rejected.
 func TestCheckExists_Authorization(t *testing.T) {
 	t.Run("valid secret is accepted", func(t *testing.T) {
 		const secret = "valid-secret"
@@ -334,10 +386,7 @@ func TestCheckExists_Authorization(t *testing.T) {
 	})
 }
 
-// TestCheckExists_AllIDsEmpty asserts that the client does not validate the
-// "at least one ID required" rule — that is the server's responsibility. When
-// all three IDs are empty the request is forwarded as-is and the server's
-// response is returned without a client-side error.
+// TestCheckExists_AllIDsEmpty asserts that empty IDs are forwarded to the server without a client-side error; validation is the server's responsibility.
 func TestCheckExists_AllIDsEmpty(t *testing.T) {
 	const secret = "test-secret"
 
@@ -362,6 +411,264 @@ func TestCheckExists_AllIDsEmpty(t *testing.T) {
 		_, _, err := c.CheckExists(context.Background(), "", "", "")
 		if err != nil {
 			t.Fatalf("client must not error on empty IDs, got: %v", err)
+		}
+	})
+}
+
+// -----------------------------------------------------------------------------
+// CreateVuln
+// -----------------------------------------------------------------------------
+
+// TestCreateVuln_StatusCodes asserts that CreateVuln returns the assigned ID on 201 and an error for all other status codes.
+func TestCreateVuln_StatusCodes(t *testing.T) {
+	const secret = "test-secret"
+
+	cases := []struct {
+		name    string
+		handler http.HandlerFunc
+		wantID  string
+		wantErr bool
+	}{
+		{
+			name:    "201 returns id and no error",
+			handler: requireSecret(secret, vulnCreated("new-uuid-123")),
+			wantID:  "new-uuid-123",
+		},
+		{
+			name: "200 returns unexpected status error",
+			handler: requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+				respondEnvelope(w, http.StatusOK, map[string]any{"id": "some-id"})
+			}),
+			wantErr: true,
+		},
+		{
+			name: "400 returns unexpected status error",
+			handler: requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+				respondEnvelope(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
+			}),
+			wantErr: true,
+		},
+		{
+			name: "409 returns unexpected status error",
+			handler: requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+				respondEnvelope(w, http.StatusConflict, map[string]string{"error": "already exists"})
+			}),
+			wantErr: true,
+		},
+		{
+			name:    "401 returns error",
+			handler: requireSecret("other-secret", vulnCreated("should-not-reach")),
+			wantErr: true,
+		},
+		{
+			name: "500 returns error after retries",
+			handler: requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+				respondEnvelope(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			}),
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := startServer(t, secret, tc.handler)
+			id, err := c.CreateVuln(context.Background(), testVuln())
+
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got id=%q", id)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if id != tc.wantID {
+				t.Errorf("id = %q, want %q", id, tc.wantID)
+			}
+		})
+	}
+}
+
+// TestCreateVuln_RequestMethod asserts that CreateVuln sends a POST request.
+func TestCreateVuln_RequestMethod(t *testing.T) {
+	const secret = "test-secret"
+	var capturedMethod string
+
+	handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		respondEnvelope(w, http.StatusCreated, map[string]any{"id": "new-id"})
+	})
+
+	c := startServer(t, secret, handler)
+	if _, err := c.CreateVuln(context.Background(), testVuln()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedMethod != http.MethodPost {
+		t.Errorf("method = %q, want %q", capturedMethod, http.MethodPost)
+	}
+}
+
+// TestCreateVuln_RequestPath asserts that CreateVuln targets the correct API path.
+func TestCreateVuln_RequestPath(t *testing.T) {
+	const secret = "test-secret"
+	var capturedPath string
+
+	handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		respondEnvelope(w, http.StatusCreated, map[string]any{"id": "new-id"})
+	})
+
+	c := startServer(t, secret, handler)
+	if _, err := c.CreateVuln(context.Background(), testVuln()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedPath != pathVulns {
+		t.Errorf("path = %q, want %q", capturedPath, pathVulns)
+	}
+}
+
+// TestCreateVuln_RequestPayload asserts that vulnerability fields are serialized into the request body.
+func TestCreateVuln_RequestPayload(t *testing.T) {
+	const secret = "test-secret"
+	var capturedBody map[string]any
+
+	handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+			http.Error(w, "bad body", http.StatusBadRequest)
+			return
+		}
+		respondEnvelope(w, http.StatusCreated, map[string]any{"id": "new-id"})
+	})
+
+	v := testVuln()
+	c := startServer(t, secret, handler)
+	if _, err := c.CreateVuln(context.Background(), v); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	checks := map[string]any{
+		"CVEID":  v.CVEID,
+		"Source": string(v.Source),
+		"Title":  v.Title,
+	}
+	for field, want := range checks {
+		if got := capturedBody[field]; got != want {
+			t.Errorf("body[%q] = %v, want %v", field, got, want)
+		}
+	}
+}
+
+// TestCreateVuln_ContentType asserts that CreateVuln sends Content-Type: application/json on the request.
+func TestCreateVuln_ContentType(t *testing.T) {
+	const secret = "test-secret"
+	var capturedContentType string
+
+	handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+		capturedContentType = r.Header.Get("Content-Type")
+		respondEnvelope(w, http.StatusCreated, map[string]any{"id": "new-id"})
+	})
+
+	c := startServer(t, secret, handler)
+	if _, err := c.CreateVuln(context.Background(), testVuln()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedContentType != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", capturedContentType, "application/json")
+	}
+}
+
+// TestCreateVuln_Authorization asserts that the configured secret is sent as X-Internal-Secret and that wrong secrets are rejected.
+func TestCreateVuln_Authorization(t *testing.T) {
+	t.Run("valid secret is accepted", func(t *testing.T) {
+		const secret = "valid-secret"
+		c := startServer(t, secret, requireSecret(secret, vulnCreated("new-id")))
+		id, err := c.CreateVuln(context.Background(), testVuln())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id != "new-id" {
+			t.Errorf("id = %q, want %q", id, "new-id")
+		}
+	})
+
+	t.Run("wrong secret returns error", func(t *testing.T) {
+		c := startServer(t, "wrong-secret", requireSecret("server-secret", vulnCreated("new-id")))
+		_, err := c.CreateVuln(context.Background(), testVuln())
+		if err == nil {
+			t.Error("expected error for wrong secret, got nil")
+		}
+	})
+
+	t.Run("X-Internal-Secret header carries the configured secret", func(t *testing.T) {
+		const secret = "inspect-me"
+		var capturedSecret string
+
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			capturedSecret = r.Header.Get("X-Internal-Secret")
+			respondEnvelope(w, http.StatusCreated, map[string]any{"id": "new-id"})
+		}
+
+		c := startServer(t, secret, handler)
+		if _, err := c.CreateVuln(context.Background(), testVuln()); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if capturedSecret != secret {
+			t.Errorf("X-Internal-Secret = %q, want %q", capturedSecret, secret)
+		}
+	})
+}
+
+// TestCreateVuln_MalformedJSON asserts that the ID is decoded from the envelope's result field and that malformed responses return an error.
+func TestCreateVuln_MalformedJSON(t *testing.T) {
+	const secret = "test-secret"
+
+	t.Run("malformed envelope returns error", func(t *testing.T) {
+		handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			if _, err := w.Write([]byte(`not-valid-json`)); err != nil {
+				panic("write: " + err.Error())
+			}
+		})
+		c := startServer(t, secret, handler)
+		_, err := c.CreateVuln(context.Background(), testVuln())
+		if err == nil {
+			t.Error("expected error for malformed JSON, got nil")
+		}
+	})
+
+	t.Run("id in result field is decoded", func(t *testing.T) {
+		handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+			respondEnvelope(w, http.StatusCreated, map[string]any{"id": "result-id"})
+		})
+		c := startServer(t, secret, handler)
+		id, err := c.CreateVuln(context.Background(), testVuln())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id != "result-id" {
+			t.Errorf("id = %q, want %q", id, "result-id")
+		}
+	})
+
+	t.Run("id outside result field is not decoded", func(t *testing.T) {
+		// id is at the envelope root rather than inside result — must be ignored.
+		handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+			respond(w, http.StatusCreated, map[string]any{
+				"error": "", "errorDetail": "", "statusCode": http.StatusCreated,
+				"result": map[string]any{},
+				"id":     "should-not-be-decoded",
+			})
+		})
+		c := startServer(t, secret, handler)
+		id, err := c.CreateVuln(context.Background(), testVuln())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id != "" {
+			t.Errorf("id = %q, want empty (id must come from result field)", id)
 		}
 	})
 }
@@ -411,10 +718,19 @@ func requireSecret(secret string, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// vulnFound returns a handler that replies 200 with a single vuln object.
+// respondEnvelope writes a standard API response envelope with the given
+// status code and result payload, matching the shape produced by
+// api/internal/response.Write.
+func respondEnvelope(w http.ResponseWriter, statusCode int, result any) {
+	respond(w, statusCode, map[string]any{
+		"error": "", "errorDetail": "", "statusCode": statusCode, "result": result,
+	})
+}
+
+// vulnFound returns a handler that replies 200 with an enveloped vuln object.
 func vulnFound(id string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		respond(w, http.StatusOK, map[string]any{"id": id})
+		respondEnvelope(w, http.StatusOK, map[string]any{"id": id})
 	}
 }
 
@@ -422,5 +738,23 @@ func vulnFound(id string) http.HandlerFunc {
 func vulnNotFound() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+// vulnCreated returns a handler that replies 201 with an enveloped vuln object.
+func vulnCreated(id string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		respondEnvelope(w, http.StatusCreated, map[string]any{"id": id})
+	}
+}
+
+// testVuln returns a sample Vulnerability for use in CreateVuln tests.
+func testVuln() types.Vulnerability {
+	return types.Vulnerability{
+		CVEID:       "CVE-2024-1234",
+		Source:      types.SourceNVD,
+		Title:       "Test vulnerability",
+		Description: "A test vulnerability for unit tests",
+		CVSSScore:   7.5,
 	}
 }

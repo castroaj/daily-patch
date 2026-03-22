@@ -105,21 +105,33 @@ func New(baseURL string, secret string, timeout time.Duration) (APIClient, error
 // Private types and methods
 // -----------------------------------------------------------------------------
 
-// checkExistsResponse is the decoded body returned by GET /api/v1/vulns?{canonical_id}=...
-// The endpoint returns a single object (not a list) because canonical IDs are
-// UNIQUE in the database. A missing record is signalled by a 404, not an empty list.
-type checkExistsResponse struct {
+// envelopeResponse is the standard API response wrapper returned by all
+// endpoints. The Result field holds the endpoint-specific payload as raw JSON
+// so it can be unmarshaled into the caller's destination type.
+type envelopeResponse struct {
+	Error       string          `json:"error"`
+	ErrorDetail string          `json:"errorDetail"`
+	StatusCode  int             `json:"statusCode"`
+	Result      json.RawMessage `json:"result"`
+}
+
+// checkExistsResult is the result sub-field of the envelope returned by
+// GET /api/v1/vulns?{canonical_id}=... The endpoint returns a single object
+// because canonical IDs are UNIQUE in the database. A missing record is
+// signalled by a 404, not an empty result.
+type checkExistsResult struct {
 	ID string `json:"id"`
 }
 
-// createVulnResponse is the decoded body returned by POST /api/v1/vulns.
-type createVulnResponse struct {
+// createVulnResult is the result sub-field of the envelope returned by
+// POST /api/v1/vulns.
+type createVulnResult struct {
 	ID string `json:"id"`
 }
 
-// lastSuccessfulRunResponse is the decoded body returned by
+// lastSuccessfulRunResult is the result sub-field of the envelope returned by
 // GET /api/v1/runs/ingestion.
-type lastSuccessfulRunResponse struct {
+type lastSuccessfulRunResult struct {
 	Data []struct {
 		FinishedAt time.Time `json:"finished_at"`
 	} `json:"data"`
@@ -146,7 +158,7 @@ func (c *httpClient) CheckExists(ctx context.Context, cveID string, ghsaID strin
 		q.Set(paramEDBID, edbID)
 	}
 
-	var result checkExistsResponse
+	var result checkExistsResult
 	resp, err := c.do(ctx, http.MethodGet, pathVulns+"?"+q.Encode(), nil, &result)
 	if err != nil {
 		return "", false, err
@@ -159,7 +171,7 @@ func (c *httpClient) CheckExists(ctx context.Context, cveID string, ghsaID strin
 
 // CreateVuln posts a new vulnerability record to POST /api/v1/vulns.
 func (c *httpClient) CreateVuln(ctx context.Context, v types.Vulnerability) (string, error) {
-	var result createVulnResponse
+	var result createVulnResult
 	resp, err := c.do(ctx, http.MethodPost, pathVulns, v, &result)
 	if err != nil {
 		return "", err
@@ -201,7 +213,7 @@ func (c *httpClient) LastSuccessfulRun(ctx context.Context, source types.SourceT
 	q.Set("source", string(source))
 	q.Set("limit", "1")
 
-	var result lastSuccessfulRunResponse
+	var result lastSuccessfulRunResult
 	_, err := c.do(ctx, http.MethodGet, pathRunsIngestion+"?"+q.Encode(), nil, &result)
 	if err != nil {
 		return time.Time{}, err
@@ -270,10 +282,19 @@ func (c *httpClient) do(ctx context.Context, method, path string, body interface
 			continue
 		}
 
-		if dst != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			defer resp.Body.Close()
-			if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+			var env envelopeResponse
+			if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 				return resp, fmt.Errorf("decode response: %w", err)
+			}
+			if env.Error != "" {
+				return resp, fmt.Errorf("api error [%s]: %s", env.Error, env.ErrorDetail)
+			}
+			if dst != nil {
+				if err := json.Unmarshal(env.Result, dst); err != nil {
+					return resp, fmt.Errorf("decode response result: %w", err)
+				}
 			}
 		}
 

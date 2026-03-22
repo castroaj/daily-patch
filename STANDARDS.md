@@ -159,6 +159,13 @@ Three groups separated by blank lines, in order:
 - Use only the standard `testing` package unless a specific helper is clearly
   necessary
 - Test function names: `Test<Unit>_<Scenario>` (e.g., `TestParseVuln_MissingCVSS`)
+- Every `Test*` function must have a one-line comment immediately above it stating
+  its objective — what property it asserts or what contract it verifies. The comment
+  must start with the function name followed by a verb (e.g., `asserts`, `verifies`):
+  ```go
+  // TestNew_storesBaseURL asserts that New stores the provided base URL on the httpClient.
+  func TestNew_storesBaseURL(t *testing.T) { ... }
+  ```
 
 #### Test file structure
 
