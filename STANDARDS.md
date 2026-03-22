@@ -70,7 +70,30 @@ Three groups separated by blank lines, in order:
   necessary
 - Test function names: `Test<Unit>_<Scenario>` (e.g., `TestParseVuln_MissingCVSS`)
 
-### 8. Formatting & Linting
+### 8. File Organization
+
+Go source files must follow this section order, each separated by a comment
+divider of the form `// --- <Section> ---` (dashes padded to column 80):
+
+```
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+```
+
+Order:
+
+1. **Constants** — all `const` declarations
+2. **Public types** — exported interfaces and structs (no methods yet)
+3. **Public functions** — exported non-method functions (e.g. constructors)
+4. **Private types and methods** — unexported structs and all methods defined on them
+5. **Private functions** — unexported helpers with no receiver
+
+Omit sections that are empty. Methods always live with their type in the
+"Private types and methods" section, never mixed into the public or private
+functions sections.
+
+### 9. Formatting & Linting
 
 - Code must pass `golangci-lint run` at the pinned version (currently `v1.64.8`)
 - `gofmt` / `goimports` formatting is enforced by the linter; run before committing
