@@ -98,72 +98,6 @@ type httpClient struct {
 	http    *http.Client
 }
 
-// do executes an HTTP request, retrying up to maxRetries times on network
-// errors or 5xx responses using exponential backoff. It decodes a successful
-// response body into dst when dst is non-nil.
-func (c *httpClient) do(ctx context.Context, method, path string, body interface{}, dst interface{}) (*http.Response, error) {
-	u := c.baseURL + path
-
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		if attempt > 0 {
-			wait := time.Duration(math.Pow(2, float64(attempt))) * 500 * time.Millisecond
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(wait):
-			}
-		}
-
-		var bodyReader *bytes.Reader
-		if body != nil {
-			b, err := json.Marshal(body)
-			if err != nil {
-				return nil, fmt.Errorf("marshal request body: %w", err)
-			}
-			bodyReader = bytes.NewReader(b)
-		}
-
-		var req *http.Request
-		var err error
-		if bodyReader != nil {
-			req, err = http.NewRequestWithContext(ctx, method, u, bodyReader)
-		} else {
-			req, err = http.NewRequestWithContext(ctx, method, u, nil)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("build request: %w", err)
-		}
-		req.Header.Set("X-Internal-Secret", c.secret)
-		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
-		}
-
-		resp, err := c.http.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		if resp.StatusCode >= 500 {
-			resp.Body.Close()
-			lastErr = fmt.Errorf("server error: %s", resp.Status)
-			continue
-		}
-
-		if dst != nil {
-			defer resp.Body.Close()
-			if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
-				return resp, fmt.Errorf("decode response: %w", err)
-			}
-		}
-
-		return resp, nil
-	}
-
-	return nil, fmt.Errorf("after %d attempts: %w", maxRetries, lastErr)
-}
-
 // CheckExists queries GET /api/v1/vulns with canonical ID query parameters.
 func (c *httpClient) CheckExists(ctx context.Context, cveID, ghsaID, edbID string) (string, bool, error) {
 	q := url.Values{}
@@ -251,6 +185,72 @@ func (c *httpClient) LastSuccessfulRun(ctx context.Context, source types.SourceT
 		return time.Time{}, nil
 	}
 	return result.Data[0].FinishedAt, nil
+}
+
+// do executes an HTTP request, retrying up to maxRetries times on network
+// errors or 5xx responses using exponential backoff. It decodes a successful
+// response body into dst when dst is non-nil.
+func (c *httpClient) do(ctx context.Context, method, path string, body interface{}, dst interface{}) (*http.Response, error) {
+	u := c.baseURL + path
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			wait := time.Duration(math.Pow(2, float64(attempt))) * 500 * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+
+		var bodyReader *bytes.Reader
+		if body != nil {
+			b, err := json.Marshal(body)
+			if err != nil {
+				return nil, fmt.Errorf("marshal request body: %w", err)
+			}
+			bodyReader = bytes.NewReader(b)
+		}
+
+		var req *http.Request
+		var err error
+		if bodyReader != nil {
+			req, err = http.NewRequestWithContext(ctx, method, u, bodyReader)
+		} else {
+			req, err = http.NewRequestWithContext(ctx, method, u, nil)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("build request: %w", err)
+		}
+		req.Header.Set("X-Internal-Secret", c.secret)
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode >= 500 {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("server error: %s", resp.Status)
+			continue
+		}
+
+		if dst != nil {
+			defer resp.Body.Close()
+			if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+				return resp, fmt.Errorf("decode response: %w", err)
+			}
+		}
+
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("after %d attempts: %w", maxRetries, lastErr)
 }
 
 // -----------------------------------------------------------------------------
