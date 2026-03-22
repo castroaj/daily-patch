@@ -674,6 +674,200 @@ func TestCreateVuln_MalformedJSON(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
+// UpdateVuln
+// -----------------------------------------------------------------------------
+
+// TestUpdateVuln_StatusCodes asserts that UpdateVuln returns nil on 200 and an error for all other status codes.
+func TestUpdateVuln_StatusCodes(t *testing.T) {
+	const secret = "test-secret"
+
+	cases := []struct {
+		name    string
+		handler http.HandlerFunc
+		wantErr bool
+	}{
+		{
+			name:    "200 returns no error",
+			handler: requireSecret(secret, vulnUpdated()),
+		},
+		{
+			name: "400 returns error",
+			handler: requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+				respond(w, http.StatusBadRequest, map[string]string{"error": "invalid"})
+			}),
+			wantErr: true,
+		},
+		{
+			name: "404 returns error",
+			handler: requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+				respond(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			}),
+			wantErr: true,
+		},
+		{
+			name: "409 returns error",
+			handler: requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+				respond(w, http.StatusConflict, map[string]string{"error": "conflict"})
+			}),
+			wantErr: true,
+		},
+		{
+			name:    "401 returns error",
+			handler: requireSecret("other-secret", vulnUpdated()),
+			wantErr: true,
+		},
+		{
+			name: "500 returns error after retries",
+			handler: requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+				respond(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			}),
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := startServer(t, secret, tc.handler)
+			err := c.UpdateVuln(context.Background(), "some-uuid", testVuln())
+
+			if tc.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestUpdateVuln_RequestMethod asserts that UpdateVuln sends a PUT request.
+func TestUpdateVuln_RequestMethod(t *testing.T) {
+	const secret = "test-secret"
+	var capturedMethod string
+
+	handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		respondEnvelope(w, http.StatusOK, nil)
+	})
+
+	c := startServer(t, secret, handler)
+	if err := c.UpdateVuln(context.Background(), "some-uuid", testVuln()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedMethod != http.MethodPut {
+		t.Errorf("method = %q, want %q", capturedMethod, http.MethodPut)
+	}
+}
+
+// TestUpdateVuln_RequestPath asserts that UpdateVuln targets the correct path with the id interpolated.
+func TestUpdateVuln_RequestPath(t *testing.T) {
+	const secret = "test-secret"
+	var capturedPath string
+
+	handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		respondEnvelope(w, http.StatusOK, nil)
+	})
+
+	c := startServer(t, secret, handler)
+	if err := c.UpdateVuln(context.Background(), "target-uuid", testVuln()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedPath != pathVulns+"/target-uuid" {
+		t.Errorf("path = %q, want %q", capturedPath, pathVulns+"/target-uuid")
+	}
+}
+
+// TestUpdateVuln_RequestPayload asserts that vulnerability fields are serialized into the request body.
+func TestUpdateVuln_RequestPayload(t *testing.T) {
+	const secret = "test-secret"
+	var capturedBody map[string]any
+
+	handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+			http.Error(w, "bad body", http.StatusBadRequest)
+			return
+		}
+		respondEnvelope(w, http.StatusOK, nil)
+	})
+
+	v := testVuln()
+	c := startServer(t, secret, handler)
+	if err := c.UpdateVuln(context.Background(), "some-uuid", v); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	checks := map[string]any{
+		"CVEID":  v.CVEID,
+		"Source": string(v.Source),
+		"Title":  v.Title,
+	}
+	for field, want := range checks {
+		if got := capturedBody[field]; got != want {
+			t.Errorf("body[%q] = %v, want %v", field, got, want)
+		}
+	}
+}
+
+// TestUpdateVuln_ContentType asserts that UpdateVuln sends Content-Type: application/json on the request.
+func TestUpdateVuln_ContentType(t *testing.T) {
+	const secret = "test-secret"
+	var capturedContentType string
+
+	handler := requireSecret(secret, func(w http.ResponseWriter, r *http.Request) {
+		capturedContentType = r.Header.Get("Content-Type")
+		respondEnvelope(w, http.StatusOK, nil)
+	})
+
+	c := startServer(t, secret, handler)
+	if err := c.UpdateVuln(context.Background(), "some-uuid", testVuln()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedContentType != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", capturedContentType, "application/json")
+	}
+}
+
+// TestUpdateVuln_Authorization asserts that the configured secret is sent as X-Internal-Secret and that wrong secrets are rejected.
+func TestUpdateVuln_Authorization(t *testing.T) {
+	t.Run("valid secret is accepted", func(t *testing.T) {
+		const secret = "valid-secret"
+		c := startServer(t, secret, requireSecret(secret, vulnUpdated()))
+		if err := c.UpdateVuln(context.Background(), "some-uuid", testVuln()); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("wrong secret returns error", func(t *testing.T) {
+		c := startServer(t, "wrong-secret", requireSecret("server-secret", vulnUpdated()))
+		if err := c.UpdateVuln(context.Background(), "some-uuid", testVuln()); err == nil {
+			t.Error("expected error for wrong secret, got nil")
+		}
+	})
+
+	t.Run("X-Internal-Secret header carries the configured secret", func(t *testing.T) {
+		const secret = "inspect-me"
+		var capturedSecret string
+
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			capturedSecret = r.Header.Get("X-Internal-Secret")
+			respondEnvelope(w, http.StatusOK, nil)
+		}
+
+		c := startServer(t, secret, handler)
+		if err := c.UpdateVuln(context.Background(), "some-uuid", testVuln()); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if capturedSecret != secret {
+			t.Errorf("X-Internal-Secret = %q, want %q", capturedSecret, secret)
+		}
+	})
+}
+
+// -----------------------------------------------------------------------------
 // Test helpers
 // -----------------------------------------------------------------------------
 
@@ -738,6 +932,13 @@ func vulnFound(id string) http.HandlerFunc {
 func vulnNotFound() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+// vulnUpdated returns a handler that replies 200 with an enveloped empty result.
+func vulnUpdated() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		respondEnvelope(w, http.StatusOK, nil)
 	}
 }
 
