@@ -91,6 +91,25 @@ The API service is the sole owner of the PostgreSQL connection pool. It exposes 
 
 **Authentication:** service-to-service calls use a shared internal secret passed via a request header (`X-Internal-Secret`). The design supports upgrading to JWT-based auth for multi-tenant use without breaking existing service integrations.
 
+**Response envelope:**
+
+Every endpoint returns a consistent JSON envelope regardless of success or failure:
+
+```json
+{
+  "error":       "",
+  "errorDetail": "",
+  "statusCode":  201,
+  "result":      { ... }
+}
+```
+
+- `error` and `errorDetail` are empty strings on success; they carry a short error code and human-readable detail on failure.
+- `result` contains the response payload on success and is `null` on error responses.
+- `statusCode` always mirrors the HTTP response status code.
+
+All handlers write this envelope via the shared `api/internal/response` package (`response.Write`).
+
 **Endpoints:**
 
 | Method | Path | Description |

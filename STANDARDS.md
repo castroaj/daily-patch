@@ -129,6 +129,10 @@ Three groups separated by blank lines, in order:
   `json.NewEncoder(w).Encode(…)`)
 - Set `Content-Type` header before writing the body
 - Use explicit HTTP status codes via `w.WriteHeader()` — never rely on implicit 200
+- **Always use `response.Write`** from `api/internal/response` to send responses.
+  Never write raw JSON directly from a handler — every response must go through
+  the standard envelope (`error`, `errorDetail`, `statusCode`, `result`). See
+  SPEC.md §3b for the envelope shape.
 
 ### 8. Logging
 

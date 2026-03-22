@@ -6,17 +6,15 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
+
+	"daily-patch/api/internal/response"
 )
 
 func main() {
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "api"}); err != nil {
-			log.Println("Failed request")
-		}
+		response.Write(w, http.StatusOK, "", "", map[string]string{"status": "ok", "service": "api"})
 	})
 
 	log.Println("api listening on :8080")

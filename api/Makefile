@@ -21,8 +21,9 @@ coverage:
 	$(GO) test ./... -v -coverprofile=coverage.out; $(GO) tool cover -func=coverage.out
 
 # Lints the service; installs golangci-lint automatically if not present.
+# PATH is prefixed with gobrew's bin so golangci-lint resolves the correct go.
 lint:
-	$(GOLANGCI_LINT_BIN) run
+	PATH=$(dir $(GO)):$$PATH $(GOLANGCI_LINT_BIN) run
 
 run:
 	$(GO) run .

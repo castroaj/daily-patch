@@ -205,6 +205,16 @@ type APIClient interface {
 APIClient`. Transient errors (network, 5xx) retry up to 3× with exponential
 backoff.
 
+**Response envelope:** the API service wraps every response in a standard
+envelope (see SPEC.md §3b). The `do` helper decodes this envelope on 2xx
+responses and unmarshals the inner `result` field into `dst`. Non-2xx
+responses (404, 400, 409) are returned to caller methods unchanged — they
+inspect `resp.StatusCode` directly to decide behaviour.
+
+```json
+{ "error": "", "errorDetail": "", "statusCode": 200, "result": { ... } }
+```
+
 **REST endpoints used** (from SPEC.md §3b):
 
 | Method | Path | Used by |
