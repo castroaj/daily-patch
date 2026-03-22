@@ -129,14 +129,6 @@ type createVulnResult struct {
 	ID string `json:"id"`
 }
 
-// lastSuccessfulRunResult is the result sub-field of the envelope returned by
-// GET /api/v1/runs/ingestion.
-type lastSuccessfulRunResult struct {
-	Data []struct {
-		FinishedAt time.Time `json:"finished_at"`
-	} `json:"data"`
-}
-
 // httpClient is the production implementation of APIClient.
 type httpClient struct {
 	baseURL    string
@@ -195,33 +187,14 @@ func (c *httpClient) UpdateVuln(ctx context.Context, id string, v types.Vulnerab
 }
 
 // RecordRun posts a completed run record to POST /api/v1/runs/ingestion.
-func (c *httpClient) RecordRun(ctx context.Context, r types.RunRecord) error {
-	resp, err := c.do(ctx, http.MethodPost, pathRunsIngestion, r, nil)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("unexpected status %s", resp.Status)
-	}
-	return nil
+func (c *httpClient) RecordRun(_ context.Context, _ types.RunRecord) error {
+	panic("RecordRun: not implemented")
 }
 
-// LastSuccessfulRun queries GET /api/v1/runs/ingestion and returns the most
-// recent finished_at for the given source. Returns zero time.Time if none.
-func (c *httpClient) LastSuccessfulRun(ctx context.Context, source types.SourceType) (time.Time, error) {
-	q := url.Values{}
-	q.Set("source", string(source))
-	q.Set("limit", "1")
-
-	var result lastSuccessfulRunResult
-	_, err := c.do(ctx, http.MethodGet, pathRunsIngestion+"?"+q.Encode(), nil, &result)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if len(result.Data) == 0 {
-		return time.Time{}, nil
-	}
-	return result.Data[0].FinishedAt, nil
+// LastSuccessfulRun returns finished_at for the most recent completed run
+// for the given source. Returns zero time.Time if no prior run exists.
+func (c *httpClient) LastSuccessfulRun(_ context.Context, _ types.SourceType) (time.Time, error) {
+	panic("LastSuccessfulRun: not implemented")
 }
 
 // do executes an HTTP request, retrying up to maxRetries times on network
