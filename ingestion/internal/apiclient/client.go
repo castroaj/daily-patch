@@ -36,6 +36,12 @@ const (
 	paramEDBID  = "edb_id"
 )
 
+// API path constants used when building requests.
+const (
+	pathVulns         = "/api/v1/vulns"
+	pathRunsIngestion = "/api/v1/runs/ingestion"
+)
+
 // -----------------------------------------------------------------------------
 // Public types
 // -----------------------------------------------------------------------------
@@ -99,6 +105,26 @@ func New(baseURL, secret string, timeout time.Duration) (APIClient, error) {
 // Private types and methods
 // -----------------------------------------------------------------------------
 
+// checkExistsResponse is the decoded body returned by GET /api/v1/vulns.
+type checkExistsResponse struct {
+	Data []struct {
+		ID string `json:"id"`
+	} `json:"data"`
+}
+
+// createVulnResponse is the decoded body returned by POST /api/v1/vulns.
+type createVulnResponse struct {
+	ID string `json:"id"`
+}
+
+// lastSuccessfulRunResponse is the decoded body returned by
+// GET /api/v1/runs/ingestion.
+type lastSuccessfulRunResponse struct {
+	Data []struct {
+		FinishedAt time.Time `json:"finished_at"`
+	} `json:"data"`
+}
+
 // httpClient is the production implementation of APIClient.
 type httpClient struct {
 	baseURL    string
@@ -120,12 +146,8 @@ func (c *httpClient) CheckExists(ctx context.Context, cveID, ghsaID, edbID strin
 		q.Set(paramEDBID, edbID)
 	}
 
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	resp, err := c.do(ctx, http.MethodGet, "/api/v1/vulns?"+q.Encode(), nil, &result)
+	var result checkExistsResponse
+	resp, err := c.do(ctx, http.MethodGet, pathVulns+"?"+q.Encode(), nil, &result)
 	if err != nil {
 		return "", false, err
 	}
@@ -137,10 +159,8 @@ func (c *httpClient) CheckExists(ctx context.Context, cveID, ghsaID, edbID strin
 
 // CreateVuln posts a new vulnerability record to POST /api/v1/vulns.
 func (c *httpClient) CreateVuln(ctx context.Context, v types.Vulnerability) (string, error) {
-	var result struct {
-		ID string `json:"id"`
-	}
-	resp, err := c.do(ctx, http.MethodPost, "/api/v1/vulns", v, &result)
+	var result createVulnResponse
+	resp, err := c.do(ctx, http.MethodPost, pathVulns, v, &result)
 	if err != nil {
 		return "", err
 	}
@@ -152,7 +172,7 @@ func (c *httpClient) CreateVuln(ctx context.Context, v types.Vulnerability) (str
 
 // UpdateVuln replaces a vulnerability record via PUT /api/v1/vulns/{id}.
 func (c *httpClient) UpdateVuln(ctx context.Context, id string, v types.Vulnerability) error {
-	resp, err := c.do(ctx, http.MethodPut, "/api/v1/vulns/"+id, v, nil)
+	resp, err := c.do(ctx, http.MethodPut, pathVulns+"/"+id, v, nil)
 	if err != nil {
 		return err
 	}
@@ -164,7 +184,7 @@ func (c *httpClient) UpdateVuln(ctx context.Context, id string, v types.Vulnerab
 
 // RecordRun posts a completed run record to POST /api/v1/runs/ingestion.
 func (c *httpClient) RecordRun(ctx context.Context, r types.RunRecord) error {
-	resp, err := c.do(ctx, http.MethodPost, "/api/v1/runs/ingestion", r, nil)
+	resp, err := c.do(ctx, http.MethodPost, pathRunsIngestion, r, nil)
 	if err != nil {
 		return err
 	}
@@ -181,12 +201,8 @@ func (c *httpClient) LastSuccessfulRun(ctx context.Context, source types.SourceT
 	q.Set("source", string(source))
 	q.Set("limit", "1")
 
-	var result struct {
-		Data []struct {
-			FinishedAt time.Time `json:"finished_at"`
-		} `json:"data"`
-	}
-	_, err := c.do(ctx, http.MethodGet, "/api/v1/runs/ingestion?"+q.Encode(), nil, &result)
+	var result lastSuccessfulRunResponse
+	_, err := c.do(ctx, http.MethodGet, pathRunsIngestion+"?"+q.Encode(), nil, &result)
 	if err != nil {
 		return time.Time{}, err
 	}
