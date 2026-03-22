@@ -16,6 +16,9 @@ dist/
 build/
 .pytest_cache/
 
+# Test coverage
+coverage.out
+
 # Output
 output/*.html
 
