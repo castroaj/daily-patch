@@ -11,7 +11,7 @@ build:
 	go build -o bin/ingestion .
 
 test:
-	go test ./...
+	go test ./... -v
 
 # Lints the service; installs golangci-lint automatically if not present.
 lint:
