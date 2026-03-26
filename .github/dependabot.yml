@@ -1,0 +1,53 @@
+# dependabot.yml — Dependabot configuration for automated dependency updates
+#
+# Covers all four package ecosystems in the project: Go modules for api and
+# ingestion, pip for scorer and generator, and GitHub Actions. Weekly updates
+# are grouped by ecosystem to reduce PR noise.
+
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /api
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - go
+
+  - package-ecosystem: gomod
+    directory: /ingestion
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - go
+
+  - package-ecosystem: pip
+    directory: /scorer
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - python
+
+  - package-ecosystem: pip
+    directory: /generator
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - python
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - ci
