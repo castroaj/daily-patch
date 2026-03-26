@@ -8,14 +8,14 @@ conform to the interfaces, types, and conventions defined here.
 
 ## 1. Package Layout
 
+**Implemented:**
+
 ```
 ingestion/
-  main.go                              # entry point; wires config, registry, runner
+  main.go                              # entry point; wires registry, runner (config wiring TBD)
   specs/
     backend.md                         # this document
   internal/
-    config/
-      config.go                        # load config.yaml + env var injection
     types/
       vuln.go                          # Vulnerability, RunRecord, SourceType
     apiclient/
@@ -23,6 +23,14 @@ ingestion/
     source/
       source.go                        # Source interface
       registry.go                      # Registry struct + Register/All methods
+    runner/
+      runner.go                        # orchestrates sources → dedup → persist → record
+```
+
+**Planned (not yet implemented):**
+
+```
+  internal/
     sources/
       nvd/
         nvd.go                         # NVD API v2 source implementation
@@ -30,9 +38,9 @@ ingestion/
         ghsa.go                        # GitHub Security Advisories implementation
       exploitdb/
         exploitdb.go                   # Exploit-DB CSV/RSS source implementation
-    runner/
-      runner.go                        # orchestrates sources → dedup → persist → record
 ```
+
+Config loading has no dedicated package yet — see §8 for the incremental strategy.
 
 **Rationale:**
 
@@ -201,9 +209,21 @@ type APIClient interface {
 ```
 
 **Implementation:** unexported `httpClient` struct holding `baseURL`,
-`secret`, and `*http.Client`. Constructor: `func New(baseURL, secret string)
-APIClient`. Transient errors (network, 5xx) retry up to 3× with exponential
-backoff.
+`secret`, and `*http.Client`. Constructor:
+
+```go
+func New(baseURL, secret string, timeout time.Duration) (APIClient, error)
+```
+
+Returns an error if `baseURL` is not a valid absolute HTTP/HTTPS URL (no
+trailing slash) or if `secret` contains non-printable or whitespace
+characters. Pass `DefaultTimeout` (30 s) when no custom value is needed.
+
+`RecordRun` and `LastSuccessfulRun` are currently stubbed — both panic with
+`"not implemented"`. They will be filled in once the run-tracking API
+endpoints are designed. See issue #7.
+
+Transient errors (network, 5xx) retry up to 3× with exponential backoff.
 
 **Response envelope:** the API service wraps every response in a standard
 envelope (see SPEC.md §3b). The `do` helper decodes this envelope on 2xx
@@ -237,8 +257,8 @@ type Runner struct {
 
 func New(client apiclient.APIClient, sources []source.Source) *Runner
 
-// Run executes sources sequentially. Source failures are logged and skipped;
-// Run returns non-nil only if all sources fail.
+// Run executes sources sequentially. Source failures are logged and
+// accumulated; Run returns a joined non-nil error if any source fails.
 func (r *Runner) Run(ctx context.Context) error
 ```
 
@@ -298,23 +318,26 @@ Pool size is read from each source's config subtree.
 
 ---
 
-## 8. Configuration (`internal/config/config.go`)
+## 8. Configuration
 
-The `Config` struct mirrors the `config.yaml` schema. Secrets are injected
-from environment variables after the file is parsed.
+Config loading is implemented **incrementally** — each source type parses its
+own section of `config.yaml` when it is built, rather than loading the entire
+config structure upfront. This avoids speculating on config fields before the
+sources that need them exist.
+
+There is no `internal/config` package yet. The eventual design is:
+
+- `main.go` reads the raw YAML file once and passes each source its own
+  config subtree.
+- Secrets (`NVD_API_KEY`, `GITHUB_TOKEN`, `API_INTERNAL_SECRET`) are read
+  from environment variables and overlaid after the file is parsed.
+- The service exits with a descriptive error if `config.yaml` is missing,
+  malformed, or a required field is absent.
+
+The config structs below are the **intended target** for when sources are
+added — not the current state:
 
 ```go
-type Config struct {
-    Sources SourcesConfig
-    API     APIConfig
-}
-
-type SourcesConfig struct {
-    NVD      NVDConfig
-    GitHub   GitHubConfig
-    ExploitDB ExploitDBConfig
-}
-
 type NVDConfig struct {
     Enabled  bool
     APIKey   string // from env: NVD_API_KEY
@@ -338,9 +361,6 @@ type APIConfig struct {
 }
 ```
 
-`config.Load(path string) (*Config, error)` reads `config.yaml` at `path`,
-then overlays environment variables.
-
 ---
 
 ## 9. Error Handling
@@ -349,7 +369,7 @@ then overlays environment variables.
 |----------|----------|
 | Source `Fetch` fails | Log, record run with zero counts, `continue` to next source |
 | Per-record API failure | Log + skip record; run counter reflects successful records only |
-| All sources fail | `Runner.Run` returns `errors.Join(errs...)` → `main.go` calls `log.Fatalf` → non-zero exit |
+| Any source fails | `Runner.Run` returns `errors.Join(errs...)` → `main.go` calls `log.Fatalf` → non-zero exit |
 | API transient error (network, 5xx) | `httpClient` retries up to 3× with exponential backoff |
 | Context cancellation | All operations check `ctx.Done()`; partial runs are not recorded |
 
@@ -359,13 +379,19 @@ then overlays environment variables.
 
 All internal packages use the module prefix `daily-patch/ingestion/internal/`:
 
+**Implemented:**
+
 ```
 daily-patch/ingestion/internal/types
 daily-patch/ingestion/internal/apiclient
 daily-patch/ingestion/internal/source
+daily-patch/ingestion/internal/runner
+```
+
+**Planned:**
+
+```
 daily-patch/ingestion/internal/sources/nvd
 daily-patch/ingestion/internal/sources/ghsa
 daily-patch/ingestion/internal/sources/exploitdb
-daily-patch/ingestion/internal/runner
-daily-patch/ingestion/internal/config
 ```
