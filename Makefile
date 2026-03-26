@@ -1,10 +1,10 @@
 # Root Makefile — daily-patch
 #
 # Delegates to each service subdirectory. Go services (api, ingestion) support
-# build/test/lint/docker-build/clean; Python services (scorer, generator) support
-# setup/run/test/lint/docker-build/clean. Docker Compose targets manage the full stack.
+# build/test/coverage/lint/docker-build/clean; Python services (scorer, generator) support
+# setup/run/test/coverage/lint/docker-build/clean. Docker Compose targets manage the full stack.
 
-.PHONY: build test lint docker-build up down clean setup
+.PHONY: build test coverage lint docker-build up down clean setup
 
 # Build all Go service binaries
 build:
@@ -17,6 +17,13 @@ test:
 	$(MAKE) -C ingestion test
 	$(MAKE) -C scorer test
 	$(MAKE) -C generator test
+
+# Run tests with coverage reporting across all services
+coverage:
+	$(MAKE) -C api coverage
+	$(MAKE) -C ingestion coverage
+	$(MAKE) -C scorer coverage
+	$(MAKE) -C generator coverage
 
 # Lint all services; golangci-lint for Go, ruff for Python
 lint:

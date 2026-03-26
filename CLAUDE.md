@@ -97,6 +97,39 @@ Migrations live in `db/migrations/` and are managed via `golang-migrate`. They a
 - The scoring service writes results via `POST /api/v1/vulns/{id}/scores`
 - The ingestion service creates records via `POST /api/v1/vulns` and updates via `PUT /api/v1/vulns/{id}`
 
+## Go API Client Conventions
+
+When implementing an HTTP client in Go (e.g. `apiclient`):
+
+- **Path constants** — every URL path passed to `do` must be a named `const`
+  declared in the file's constants section. Hardcoded path strings inside
+  method bodies are not permitted.
+- **Named response types** — every struct decoded from an API response body
+  must be a named type declared in the file's private types section. Anonymous
+  structs defined inline within a function body are not permitted.
+
+```go
+// Good
+const pathVulns = "/api/v1/vulns"
+
+type checkExistsResponse struct {
+    Data []struct {
+        ID string `json:"id"`
+    } `json:"data"`
+}
+
+func (c *httpClient) CheckExists(...) {
+    var result checkExistsResponse
+    c.do(ctx, http.MethodGet, pathVulns+"?"+q.Encode(), nil, &result)
+}
+
+// Bad
+func (c *httpClient) CheckExists(...) {
+    var result struct { ... }               // anonymous struct — not allowed
+    c.do(ctx, http.MethodGet, "/api/v1/vulns?"+q.Encode(), nil, &result) // hardcoded path — not allowed
+}
+```
+
 ## File Header Standard
 
 Every source file in this repository must begin with a file header comment. Use the native comment character for the file type.

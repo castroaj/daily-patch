@@ -1,34 +1,43 @@
 # Makefile — build targets for the ingestion service
 #
-# Targets: build, test, lint, run, docker-build, clean, setup
+# Targets: build, test, coverage, lint, run, docker-build, clean, setup
+
+# Prefer gobrew-managed Go when available; fall back to PATH go.
+GOBREW_GO     := $(HOME)/.gobrew/current/bin/go
+GO            := $(if $(wildcard $(GOBREW_GO)),$(GOBREW_GO),go)
 
 GOLANGCI_LINT_VERSION := v1.64.8
-GOLANGCI_LINT_BIN     := $(shell go env GOPATH)/bin/golangci-lint
+GOLANGCI_LINT_BIN     := $(shell $(GO) env GOPATH)/bin/golangci-lint
 
-.PHONY: build test lint run docker-build clean setup
+.PHONY: build test coverage lint run docker-build clean setup
 
 build:
-	go build -o bin/ingestion .
+	$(GO) build -o bin/ingestion .
 
 test:
-	go test ./...
+	$(GO) test ./... -v -cover
+
+coverage:
+	$(GO) test ./... -v -coverprofile=coverage.out; $(GO) tool cover -func=coverage.out
 
 # Lints the service; installs golangci-lint automatically if not present.
+# PATH is prefixed with gobrew's bin so golangci-lint resolves the correct go.
 lint:
-	$(GOLANGCI_LINT_BIN) run
+	PATH=$(dir $(GO)):$$PATH $(GOLANGCI_LINT_BIN) run
 
 run:
-	go run .
+	$(GO) run .
 
 docker-build:
 	docker build -t daily-patch/ingestion .
 
 clean:
 	rm -rf bin/
+	rm -f ./coverage.out
 
 # Explicitly install golangci-lint at the pinned version.
 setup: $(GOLANGCI_LINT_BIN)
 
 $(GOLANGCI_LINT_BIN):
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
-		| sh -s -- -b $(shell go env GOPATH)/bin $(GOLANGCI_LINT_VERSION)
+		| sh -s -- -b $(shell $(GO) env GOPATH)/bin $(GOLANGCI_LINT_VERSION)

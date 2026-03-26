@@ -1,14 +1,14 @@
 # Makefile — build targets for the generator service
 #
-# Targets: setup, run, test, lint, docker-build, clean
+# Targets: setup, run, test, coverage, lint, docker-build, clean
 
-VENV := .venv
+VENV   := .venv
 PYTHON := $(VENV)/bin/python
-PIP := $(VENV)/bin/pip
+PIP    := $(VENV)/bin/pip
 PYTEST := $(VENV)/bin/pytest
-RUFF := $(VENV)/bin/ruff
+RUFF   := $(VENV)/bin/ruff
 
-.PHONY: setup run test lint docker-build clean
+.PHONY: setup run test coverage lint docker-build clean
 
 setup: $(VENV)/bin/activate
 
@@ -23,6 +23,9 @@ run: setup
 test: setup
 	$(PYTEST)
 
+coverage:
+	@echo "coverage: not yet implemented for generator"
+
 lint: setup
 	$(RUFF) check .
 	$(RUFF) format --check .
@@ -34,3 +37,4 @@ clean:
 	rm -rf $(VENV)
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type d -name .pytest_cache -exec rm -rf {} +
+	find . -type d -name .coverage -exec rm -rf {} +

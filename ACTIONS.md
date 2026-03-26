@@ -16,8 +16,8 @@ A `changes` job runs first using `dorny/paths-filter` to detect which service di
 |-----|-----------|-------|
 | `api` | `api/**` changed | setup-go 1.23 → cache modules → `make setup` → `make build test lint` |
 | `ingestion` | `ingestion/**` changed | setup-go 1.23 → cache modules → `make setup` → `make build test lint` |
-| `scorer` | `scorer/**` changed | setup-python 3.12 → cache `.venv` → `make setup test` |
-| `generator` | `generator/**` changed | setup-python 3.12 → cache `.venv` → `make setup test` |
+| `scorer` | `scorer/**` changed | setup-python 3.12 → cache `.venv` → `make setup test lint` |
+| `generator` | `generator/**` changed | setup-python 3.12 → cache `.venv` → `make setup test lint` |
 
 **Caching:**
 - Go jobs cache `~/.cache/go-build` and `~/go/pkg/mod`, keyed on `<service>/go.mod`.
@@ -44,15 +44,41 @@ Each job contains a commented-out push block — see "Extending Workflows" below
 
 ---
 
+### `codeql.yml` — CodeQL Static Analysis
+
+**Triggers:** `push` to `main`; `pull_request` targeting `main`.
+
+Runs GitHub's CodeQL engine across both language ecosystems using a matrix strategy. Required by the main branch ruleset before merging.
+
+| Job | Languages | Steps |
+|-----|-----------|-------|
+| `analyze` | `go`, `python` (matrix) | checkout → `codeql-action/init` → `codeql-action/autobuild` → `codeql-action/analyze` |
+
+**Permissions required:** `security-events: write`, `actions: read`, `contents: read`.
+
+---
+
+### `trivy.yml` — Container Image Security Scan
+
+**Triggers:** `push` to `main`; `pull_request` targeting `main`.
+
+Builds each service image locally (not pushed) then runs Trivy twice per image: once in CycloneDX SBOM format (artifact) and once in SARIF format (GitHub Security tab). Uses `fail-fast: false` so a finding in one image does not abort scans of the others. `exit-code: 0` means findings are reported but do not fail the workflow.
+
+| Job | Matrix | Outputs |
+|-----|--------|---------|
+| `scan` | `api`, `ingestion`, `scorer`, `generator` | `sbom-<service>` artifact (CycloneDX, 90-day retention) + SARIF upload to GitHub Security tab |
+
+**Permissions required:** `contents: read`, `security-events: write`.
+
+---
+
 ## Required Secrets
 
-The current baseline requires no secrets beyond the automatic `GITHUB_TOKEN` provided by GitHub Actions. The workflows do not push images or call external APIs.
+The current baseline requires no user-defined secrets. All four workflows use only the automatic `GITHUB_TOKEN` provided by GitHub Actions. No images are pushed and no external APIs are called.
 
-Future additions will need:
-
-| Secret | Purpose | Needed when |
-|--------|---------|-------------|
-| `GITHUB_TOKEN` | Push images to ghcr.io (auto-provided) | When image push is enabled |
+| Secret / Permission | Purpose | Needed when |
+|---------------------|---------|-------------|
+| `GITHUB_TOKEN` (auto) | Upload SARIF to GitHub Security tab; push images to ghcr.io | Already active for Trivy/CodeQL; push requires `packages: write` scope |
 | `DATABASE_URL` | Integration tests against a live DB | When integration tests are added |
 
 ---
