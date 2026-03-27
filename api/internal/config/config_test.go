@@ -13,6 +13,7 @@ import (
 // -----------------------------------------------------------------------------
 
 func TestLoad_ValidFile(t *testing.T) {
+	clearEnv(t)
 	yaml := `
 api:
   listen: ":9090"
@@ -37,6 +38,7 @@ database:
 }
 
 func TestLoad_DefaultListen(t *testing.T) {
+	clearEnv(t)
 	yaml := `
 api:
   internal_secret: "s"
@@ -98,6 +100,7 @@ database:
 }
 
 func TestLoad_MissingInternalSecret(t *testing.T) {
+	clearEnv(t)
 	yaml := `
 api:
 database:
@@ -111,6 +114,7 @@ database:
 }
 
 func TestLoad_MissingDSN(t *testing.T) {
+	clearEnv(t)
 	yaml := `
 api:
   internal_secret: "s"
@@ -131,6 +135,7 @@ func TestLoad_FileNotFound(t *testing.T) {
 }
 
 func TestLoad_MalformedYAML(t *testing.T) {
+	clearEnv(t)
 	path := writeTemp(t, ":::invalid yaml:::")
 	_, err := Load(path)
 	if err == nil {
@@ -141,6 +146,21 @@ func TestLoad_MalformedYAML(t *testing.T) {
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
+
+// clearEnv unsets API_INTERNAL_SECRET and DATABASE_URL for the duration of
+// the test and restores them afterwards. Call at the top of any test that
+// asserts file-sourced values, so a developer's shell environment cannot
+// silently override them.
+func clearEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{envInternalSecret, envDatabaseURL} {
+		prior, ok := os.LookupEnv(key)
+		os.Unsetenv(key)
+		if ok {
+			t.Cleanup(func() { os.Setenv(key, prior) })
+		}
+	}
+}
 
 // writeTemp writes content to a temporary file and returns its path.
 // The file is removed when the test ends.
