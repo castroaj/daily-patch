@@ -11,7 +11,7 @@ httpx==0.28.1
 idna==3.11
 iniconfig==2.3.0
 jiter==0.9.1
-MarkupSafe==2.1.5
+MarkupSafe==3.0.3
 packaging==26.0
 pluggy==1.5.0
 pydantic==2.10.6
