@@ -27,7 +27,7 @@ jobs:
       scorer: ${{ steps.filter.outputs.scorer }}
       generator: ${{ steps.filter.outputs.generator }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dorny/paths-filter@v3
         id: filter
@@ -51,7 +51,7 @@ jobs:
       run:
         working-directory: api/
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v6
         with:
@@ -82,7 +82,7 @@ jobs:
       run:
         working-directory: ingestion/
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v6
         with:
@@ -113,7 +113,7 @@ jobs:
       run:
         working-directory: scorer/
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
@@ -138,7 +138,7 @@ jobs:
       run:
         working-directory: generator/
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
