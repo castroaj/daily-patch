@@ -26,7 +26,7 @@ lint:
 	PATH=$(dir $(GO)):$$PATH $(GOLANGCI_LINT_BIN) run
 
 run:
-	$(GO) run .
+	$(GO) run . -c $(PWD)/config.local.yaml
 
 docker-build:
 	docker build -t daily-patch/api .

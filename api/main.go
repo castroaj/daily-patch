@@ -32,21 +32,15 @@ import (
 
 const (
 	programName        = "api"
-	programDescription = `REST API server for the daily-patch vulnerability intelligence pipeline.
+	programDescription = `
+REST API server for the daily-patch vulnerability intelligence pipeline.
 Ingests CVE/advisory data, serves it over a versioned REST API, and supports
 LLM-based relevance scoring via internal service-to-service auth.
 
 Environment variables:
-  API_INTERNAL_SECRET   Shared secret for X-Internal-Secret header auth. Required.
-  DATABASE_URL          PostgreSQL DSN (e.g. postgres://user:pass@host/db). Required.
-
-Examples:
-  # Run inside Docker Compose:
-  api -c /app/config.yaml
-
-  # Run locally against a dev config:
-  API_INTERNAL_SECRET=dev-secret DATABASE_URL=postgres://localhost/daily_patch \
-    api -c config.local.yaml`
+	API_INTERNAL_SECRET   Shared secret for X-Internal-Secret header auth. Required.
+	DATABASE_URL          PostgreSQL DSN (e.g. postgres://user:pass@host/db). Required.
+`
 
 	configHelp = "Path to the YAML configuration file. Secrets (API_INTERNAL_SECRET, DATABASE_URL) are read from environment variables and overlay the file values."
 
@@ -88,6 +82,7 @@ func main() {
 	defer stop()
 
 	if err := run(ctx, os.Args, os.Stdout, os.Stderr, nil); err != nil {
+		slog.Error("Failed to start HTTP server", "error", err.Error())
 		os.Exit(exitCodeError)
 	}
 }
@@ -166,7 +161,8 @@ func parseFlags(args []string) (string, error) {
 	})
 
 	if err := parser.Parse(args); err != nil {
-		return "", fmt.Errorf("%s", parser.Usage(err))
+		fmt.Printf(parser.Usage(fmt.Sprintf("failed to parse arguments (%s)", err)))
+		return "", fmt.Errorf("failed to parse arguments (%s)", err)
 	}
 
 	return *configPath, nil
