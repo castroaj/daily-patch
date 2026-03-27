@@ -161,7 +161,7 @@ func parseFlags(args []string) (string, error) {
 	})
 
 	if err := parser.Parse(args); err != nil {
-		fmt.Printf(parser.Usage(fmt.Sprintf("failed to parse arguments (%s)", err)))
+		fmt.Print(parser.Usage(fmt.Sprintf("failed to parse arguments (%s)", err)))
 		return "", fmt.Errorf("failed to parse arguments (%s)", err)
 	}
 
