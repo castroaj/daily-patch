@@ -136,10 +136,14 @@ Three groups separated by blank lines, in order:
 
 ### 8. Logging
 
-- Use the standard `log` package (no structured logger yet; will be revisited when
-  services grow)
-- `log.Fatal` / `log.Fatalf` for unrecoverable startup errors
-- `log.Printf` for informational runtime messages
+- Go services use `log/slog` for structured logging
+- Loggers are constructed in `main.go` with `slog.NewJSONHandler(os.Stdout, nil)`
+  and passed as dependencies — not accessed globally
+- Prefer `slog.ErrorContext` / `slog.InfoContext` inside handlers so the context
+  (and request ID) is preserved
+- Do not use the `log` package in new code; `log.Fatal` / `log.Fatalf` are still
+  acceptable in `main.go` for unrecoverable startup errors before the slog logger
+  is initialised
 - Do not log inside library-style packages; return errors instead
 
 ### 9. Testing

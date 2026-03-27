@@ -85,7 +85,7 @@ The REST API is the **single source of truth interface** for all consumers. Post
 
 ### 3b. REST API Service (Go)
 
-**Framework:** chi or gin (to be decided at implementation time).
+**Framework:** github.com/go-chi/chi/v5.
 
 The API service is the sole owner of the PostgreSQL connection pool. It exposes all data via a versioned REST interface under `/api/v1/`.
 
@@ -122,6 +122,7 @@ All handlers write this envelope via the shared `api/internal/response` package 
 | `GET` | `/api/v1/vulns/{id}/scores` | Retrieve scoring results for a vulnerability |
 | `POST` | `/api/v1/vulns/{id}/scores` | Submit a scoring result (used by scoring service) |
 | `GET` | `/api/v1/runs/ingestion` | List ingestion run logs |
+| `POST` | `/api/v1/runs/ingestion` | Record a completed ingestion run (used by ingestion service) |
 | `GET` | `/api/v1/runs/newsletter` | List newsletter run logs |
 | `POST` | `/api/v1/runs/newsletter` | Record a completed newsletter run |
 

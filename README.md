@@ -163,6 +163,10 @@ cd api && make build test lint
 cd ingestion && make build test lint
 cd scorer && make test lint
 cd generator && make test lint
+
+# Run the api service locally (requires a running PostgreSQL instance)
+cd api && API_INTERNAL_SECRET=dev-secret DATABASE_URL=postgres://localhost/daily_patch \
+  go run . -c config.local.yaml
 ```
 
 ---
