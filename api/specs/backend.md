@@ -12,32 +12,40 @@ interfaces, types, and conventions defined here.
 
 ```
 api/
-  main.go                          # rewritten: config → DB → metrics → router → server
+  main.go                          # config → DB → router → server (testable run() pattern)
+  main_test.go                     # tests for run() lifecycle
+  Makefile                         # build, test, lint, coverage, run targets
   specs/backend.md                 # this document
   internal/
+    config/config.go               # parse config.yaml + env var overlay
+    postgres/
+      db.go                        # pgxpool init, embedded migrations, ping
+      db_test.go                   # unit + integration tests
+      migrations/
+        001_create_ingestion_tables.up.sql
+        001_create_ingestion_tables.down.sql
+    store/
+      store.go                     # VulnStore, ScoreStore, RunStore interfaces + domain types
+    middleware/middleware.go        # requestID, recovery, logger, metrics, auth
+    handler/
+      health.go                    # GET /health
+      vuln.go                      # GET/POST/PUT /api/v1/vulns[/{id}] (501 stubs)
+      score.go                     # GET/POST /api/v1/vulns/{id}/scores (501 stubs)
+      run.go                       # GET/POST /api/v1/runs/{ingestion,newsletter} (501 stubs)
     response/response.go           # Write(w, status, errType, detail, result)
+    router/router.go               # chi mux, route registration, sub-router mounting
 ```
 
 **Planned:**
 
 ```
   internal/
-    config/config.go               # parse config.yaml + env var overlay
-    db/db.go                       # pgxpool init, ping, close
     store/
-      store.go                     # VulnStore, ScoreStore, RunStore interfaces + domain types
       postgres/
         vuln.go                    # pgx implementation of VulnStore
         score.go                   # pgx implementation of ScoreStore
         run.go                     # pgx implementation of RunStore
-    middleware/middleware.go        # requestID, recovery, logger, metrics, auth
     metrics/metrics.go             # Prometheus metric registrations
-    handler/
-      health.go                    # GET /health
-      vuln.go                      # GET/POST/PUT /api/v1/vulns[/{id}]
-      score.go                     # GET/POST /api/v1/vulns/{id}/scores
-      run.go                       # GET/POST /api/v1/runs/{ingestion,newsletter}
-    router/router.go               # chi mux, route registration, sub-router mounting
 ```
 
 **Rationale:**
@@ -45,9 +53,12 @@ api/
 - `internal/store/store.go` is a leaf package — defines interfaces and domain
   types; no internal imports from within the `api/` module. This prevents
   circular dependencies.
-- `internal/store/postgres/` imports `store` and `pgx/v5`; handlers never
-  import `postgres` directly. The concrete pgx implementations are swappable
-  and easily mocked in tests.
+- `internal/postgres/` owns the connection pool, embedded migrations, and
+  database lifecycle. The package is named `postgres` (not `db`) to make the
+  pgx/PostgreSQL coupling explicit.
+- `internal/store/postgres/` (planned) will import `store` and `pgx/v5`;
+  handlers never import `postgres` directly. The concrete pgx implementations
+  are swappable and easily mocked in tests.
 - Handlers import `store` (interface) only — the concrete implementation is
   injected by `router.New`.
 - No `init()` self-registration anywhere. All wiring is explicit in `main.go`.
@@ -91,18 +102,32 @@ cause `main.go` to call `log.Fatalf` and exit non-zero.
 
 ---
 
-## 3. Database (`internal/db`)
+## 3. Database (`internal/postgres`)
 
 ```go
-// New opens a pgxpool connection pool and pings the database within a 5-second
-// deadline. Returns an error if the pool cannot be opened or the ping fails.
+// New opens a pgxpool connection pool, runs any pending embedded migrations,
+// and pings the database within a 5-second deadline. Returns an error if
+// migrations fail, the pool cannot be created, or the ping fails.
 // Caller is responsible for calling pool.Close() at shutdown.
-func New(ctx context.Context, dsn string) (*pgxpool.Pool, error)
+func New(ctx context.Context, dsn string, log *slog.Logger) (*pgxpool.Pool, error)
 ```
 
-The 5-second deadline is enforced via `context.WithTimeout` inside `New`.
-A failed ping at startup causes `main.go` to log the error and call
-`os.Exit(1)`.
+The function performs three steps in order:
+
+1. **Run migrations** — SQL files are embedded via `//go:embed migrations/*.sql`.
+   The golang-migrate `iofs` source driver reads from the embedded FS, and the
+   `pgx5` database driver applies them. `postgres://` DSNs are converted to
+   `pgx5://` for driver compatibility. `migrate.ErrNoChange` is treated as
+   success (idempotent on restart).
+2. **Create pool** — `pgxpool.New(ctx, dsn)` opens the connection pool.
+3. **Ping** — `pool.Ping` with a 5-second `context.WithTimeout` verifies
+   connectivity. On failure the pool is closed before returning the error.
+
+Structured logging is emitted at each step: migration state (version, dirty
+flag), pool creation, ping attempt, and final connectivity confirmation.
+
+A failed `New` at startup causes `run()` to return an error, which `main()`
+logs and exits with code 1.
 
 ---
 
@@ -428,32 +453,61 @@ unexpected store errors. Include the request ID via
 
 ## 9. `main.go` Wiring
 
+`main()` is a thin signal-handling wrapper. All logic lives in the testable
+`run()` function:
+
 ```go
-// startup sequence
-cfg, err := config.Load("/app/config.yaml")
-// → log.Fatalf on error
-
-log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
-if err := metrics.Register(prometheus.DefaultRegisterer); err != nil {
-    log.Error("register metrics", "err", err)
-    os.Exit(1)
+// main — registers SIGINT/SIGTERM handlers and delegates to run().
+func main() {
+    ctx, stop := signal.NotifyContext(context.Background(),
+        syscall.SIGINT, syscall.SIGTERM)
+    defer stop()
+    if err := run(ctx, os.Args, os.Stdout, os.Stderr, nil); err != nil {
+        slog.Error("Failed to start HTTP server", "error", err.Error())
+        os.Exit(exitCodeError)
+    }
 }
+```
 
-pool, err := db.New(ctx, cfg.Database.DSN)
-// → log.Error + os.Exit(1) on error
+```go
+// run — testable lifecycle: parse flags → config → logger → DB → router →
+// listen → serve → shutdown.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer,
+    opts *runOpts) error
+```
+
+**`runOpts`** is a test hook struct:
+
+```go
+type runOpts struct {
+    ready  chan<- net.Addr // receives listen address once serving (test sync)
+    skipDB bool           // when true, skip postgres.New() (unit tests)
+}
+```
+
+**Startup sequence inside `run()`:**
+
+```go
+configPath, err := parseFlags(args)          // argparse CLI (-c/--config)
+cfg, err := config.Load(configPath)          // YAML + env overlay
+log := slog.New(slog.NewJSONHandler(stdout, nil))
+
+// Database (skipped when opts.skipDB is true)
+pool, err := postgres.New(ctx, cfg.Database.DSN, log)
 defer pool.Close()
 
-vulns  := postgres.NewVulnStore(pool)
-scores := postgres.NewScoreStore(pool)
-runs   := postgres.NewRunStore(pool)
+// Store implementations (nil until postgres store package exists)
+h := router.New(nil, nil, nil, cfg.API.InternalSecret, log)
 
-h := router.New(vulns, scores, runs, cfg.API.InternalSecret, log)
-
-srv := &http.Server{Addr: cfg.API.Listen, Handler: h}
-log.Info("api listening", "addr", cfg.API.Listen)
-log.Fatal(srv.ListenAndServe())
+srv, ln, err := startListener(cfg.API.Listen, h, log) // net.Listen("tcp", ...)
+// notify tests via opts.ready
+srv.Serve(ln) // in goroutine
+awaitShutdown(ctx, srv, serveErr, log)                 // blocks until signal
 ```
+
+**Graceful shutdown:** `awaitShutdown` blocks on `<-ctx.Done()`, then calls
+`srv.Shutdown` with a 10-second timeout. The pool closes after the server
+drains via `defer pool.Close()`.
 
 No global state. All packages receive their dependencies as constructor
 arguments.
@@ -483,30 +537,32 @@ All internal packages use the module prefix `daily-patch/api/internal/`:
 **Implemented:**
 
 ```
+daily-patch/api/internal/config
+daily-patch/api/internal/postgres
+daily-patch/api/internal/store
+daily-patch/api/internal/middleware
+daily-patch/api/internal/handler
 daily-patch/api/internal/response
+daily-patch/api/internal/router
 ```
 
 **Planned:**
 
 ```
-daily-patch/api/internal/config
-daily-patch/api/internal/db
-daily-patch/api/internal/store
 daily-patch/api/internal/store/postgres
-daily-patch/api/internal/middleware
 daily-patch/api/internal/metrics
-daily-patch/api/internal/handler
-daily-patch/api/internal/router
 ```
 
-**External dependencies to add to `go.mod`:**
+**External dependencies in `go.mod`:**
 
-| Module | Purpose |
-|--------|---------|
-| `github.com/go-chi/chi/v5` | HTTP router and middleware composition |
-| `github.com/jackc/pgx/v5` | PostgreSQL driver and connection pool |
-| `github.com/prometheus/client_golang` | Prometheus metrics |
-| `gopkg.in/yaml.v3` | YAML config parsing |
+| Module | Purpose | Status |
+|--------|---------|--------|
+| `github.com/akamensky/argparse` | CLI argument parsing | In use |
+| `github.com/go-chi/chi/v5` | HTTP router and middleware composition | In use |
+| `github.com/jackc/pgx/v5` | PostgreSQL driver and connection pool | In use |
+| `github.com/golang-migrate/migrate/v4` | Embedded database migrations | In use |
+| `gopkg.in/yaml.v3` | YAML config parsing | In use |
+| `github.com/prometheus/client_golang` | Prometheus metrics | Planned |
 
 ---
 
@@ -521,8 +577,11 @@ subsequent issues:
   body schema will mirror `IngestionRun` once the run-tracking API is
   finalized. `RecordRun` and `LastSuccessfulRun` in the ingestion service's
   API client are currently stubbed with `panic("not implemented")`.
-- **Graceful shutdown** — `SIGTERM` → `srv.Shutdown(ctx)` with a drain
-  timeout. Not implemented in the stub `main.go`.
-- **Migration execution at startup** — `golang-migrate` embedded source
-  integration; the migration files in `db/migrations/` are embedded in the
-  binary but not yet run automatically on startup.
+- **Prometheus metrics** — `internal/metrics/` package and `/metrics` endpoint
+  are not yet implemented. The `Metrics()` middleware is a no-op placeholder.
+- **Store implementations** — `internal/store/postgres/` with concrete
+  `VulnStore`, `ScoreStore`, and `RunStore` backed by pgx queries. Handlers
+  currently receive `nil` stores and return 501.
+- **Scoring and newsletter tables** — `scored_vulns` and `newsletter_runs`
+  tables will be added in a future migration (`002_...`) when those features
+  are implemented.
