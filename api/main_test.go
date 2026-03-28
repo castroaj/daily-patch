@@ -39,7 +39,7 @@ func TestRun_CancelledContext_ShutsDownCleanly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := run(ctx, []string{"api", "-c", cfgPath}, io.Discard, io.Discard, nil)
+	err := run(ctx, []string{"api", "-c", cfgPath}, io.Discard, io.Discard, &runOpts{skipDB: true})
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -51,7 +51,7 @@ func TestRun_StartsAndServesHealth(t *testing.T) {
 	defer cancel()
 
 	ready := make(chan net.Addr, 1)
-	opts := &runOpts{ready: ready}
+	opts := &runOpts{ready: ready, skipDB: true}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -102,7 +102,7 @@ func TestRun_InvalidArgs(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			err := run(ctx, tt.args, io.Discard, io.Discard, nil)
+			err := run(ctx, tt.args, io.Discard, io.Discard, &runOpts{skipDB: true})
 			if err == nil {
 				t.Fatalf("expected error for args %v, got nil", tt.args)
 			}

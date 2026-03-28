@@ -1,9 +1,8 @@
 // main.go — entry point for the api service
 //
-// Loads configuration, initialises structured logging, assembles the router,
-// and starts the HTTP server with graceful shutdown on SIGINT/SIGTERM.
-// Database initialisation and store wiring are added in a follow-on iteration
-// once the postgres layer exists.
+// Loads configuration, connects to PostgreSQL (with embedded migrations),
+// initializes structured logging, assembles the router, and starts the
+// HTTP server with graceful shutdown on SIGINT/SIGTERM.
 
 package main
 
@@ -23,6 +22,7 @@ import (
 	"github.com/akamensky/argparse"
 
 	"daily-patch/api/internal/config"
+	"daily-patch/api/internal/postgres"
 	"daily-patch/api/internal/router"
 )
 
@@ -63,9 +63,11 @@ Environment variables:
 // runOpts holds optional hooks for the run function. The ready channel, when
 // non-nil, receives the resolved listen address once the server is serving.
 // This is used exclusively by tests to wait for the server to be ready before
-// issuing requests.
+// issuing requests. When skipDB is true, database initialization is skipped
+// so that unit tests can exercise the server without a running PostgreSQL.
 type runOpts struct {
-	ready chan<- net.Addr
+	ready  chan<- net.Addr
+	skipDB bool
 }
 
 // -----------------------------------------------------------------------------
@@ -116,9 +118,22 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, opts *run
 	log := slog.New(slog.NewJSONHandler(stdout, nil))
 	log.Info("configuration loaded successfully", "config_path", configPath, "listen_addr", cfg.API.Listen)
 
+	// --- Database ------------------------------------------------------------
+	// Open a pgx connection pool and run embedded migrations. The pool is
+	// closed after the HTTP server has drained all in-flight requests.
+	// When skipDB is set (unit tests), this block is bypassed so tests can
+	// exercise the server lifecycle without a running PostgreSQL instance.
+	if opts == nil || !opts.skipDB {
+		pool, err := postgres.New(ctx, cfg.Database.DSN, log)
+		if err != nil {
+			return fmt.Errorf("database: %w", err)
+		}
+		defer pool.Close()
+	}
+
 	// --- Router --------------------------------------------------------------
-	// Store parameters are nil until the postgres layer is wired. The router
-	// still registers all routes; unimplemented handlers return 501.
+	// Store parameters are nil until the store implementations are wired.
+	// The router still registers all routes; unimplemented handlers return 501.
 	h := router.New(nil, nil, nil, cfg.API.InternalSecret, log)
 	log.Info("router initialized, all routes registered")
 
