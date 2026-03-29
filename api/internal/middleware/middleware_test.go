@@ -8,32 +8,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
+
+	"daily-patch/api/internal/metrics"
 )
-
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
-// okHandler is a trivial handler that writes 200 OK.
-var okHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-})
-
-// panicHandler always panics.
-var panicHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	panic("test panic")
-})
-
-func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError + 10}))
-}
-
-func serve(mw func(http.Handler) http.Handler, h http.Handler, req *http.Request) *httptest.ResponseRecorder {
-	rec := httptest.NewRecorder()
-	mw(h).ServeHTTP(rec, req)
-	return rec
-}
 
 // -----------------------------------------------------------------------------
 // RequestID
@@ -168,4 +150,243 @@ func TestAuth_ResponseIsJSON(t *testing.T) {
 	if !strings.HasPrefix(ct, "application/json") {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
+}
+
+// -----------------------------------------------------------------------------
+// Metrics
+// -----------------------------------------------------------------------------
+
+func TestMetrics_IncrementsRequestCounter(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := testMetrics(t, reg)
+
+	r := chiWithMetrics(m)
+	r.Get("/test", okHandler.ServeHTTP)
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	count := counterValue(t, reg, "api_http_requests_total", "GET", "/test", "200")
+	if count != 1 {
+		t.Errorf("request counter = %v, want 1", count)
+	}
+}
+
+func TestMetrics_RecordsDuration(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := testMetrics(t, reg)
+
+	r := chiWithMetrics(m)
+	r.Get("/test", okHandler.ServeHTTP)
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error: %v", err)
+	}
+
+	for _, fam := range families {
+		if fam.GetName() == "api_http_request_duration_seconds" {
+			for _, metric := range fam.GetMetric() {
+				if metric.GetHistogram().GetSampleCount() >= 1 {
+					return
+				}
+			}
+		}
+	}
+
+	t.Fatal("duration histogram has no samples")
+}
+
+func TestMetrics_InFlightGauge(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := testMetrics(t, reg)
+
+	var duringGauge float64
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	blockingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		duringGauge = gaugeValue(t, reg, "api_http_requests_in_flight")
+		wg.Done()
+		w.WriteHeader(http.StatusOK)
+	})
+
+	r := chiWithMetrics(m)
+	r.Get("/test", blockingHandler.ServeHTTP)
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	wg.Wait()
+
+	if duringGauge != 1 {
+		t.Errorf("in-flight during request = %v, want 1", duringGauge)
+	}
+
+	afterGauge := gaugeValue(t, reg, "api_http_requests_in_flight")
+	if afterGauge != 0 {
+		t.Errorf("in-flight after request = %v, want 0", afterGauge)
+	}
+}
+
+func TestMetrics_StatusLabel(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := testMetrics(t, reg)
+
+	notFoundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	r := chiWithMetrics(m)
+	r.Get("/missing", notFoundHandler.ServeHTTP)
+
+	req := httptest.NewRequest(http.MethodGet, "/missing", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	count := counterValue(t, reg, "api_http_requests_total", "GET", "/missing", "404")
+	if count != 1 {
+		t.Errorf("request counter for 404 = %v, want 1", count)
+	}
+}
+
+func TestMetrics_PathUsesRoutePattern(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := testMetrics(t, reg)
+
+	r := chiWithMetrics(m)
+	r.Get("/test/{id}", okHandler.ServeHTTP)
+
+	for _, id := range []string{"aaa", "bbb"} {
+		req := httptest.NewRequest(http.MethodGet, "/test/"+id, nil)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+	}
+
+	count := counterValue(t, reg, "api_http_requests_total", "GET", "/test/{id}", "200")
+	if count != 2 {
+		t.Errorf("request counter for pattern = %v, want 2", count)
+	}
+}
+
+func TestMetrics_NilMetrics_PassesThrough(t *testing.T) {
+	r := chiWithMetrics(nil)
+	r.Get("/test", okHandler.ServeHTTP)
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Test helpers
+// -----------------------------------------------------------------------------
+
+// okHandler is a trivial handler that writes 200 OK.
+var okHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+})
+
+// panicHandler always panics.
+var panicHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	panic("test panic")
+})
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError + 10}))
+}
+
+func serve(mw func(http.Handler) http.Handler, h http.Handler, req *http.Request) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	mw(h).ServeHTTP(rec, req)
+	return rec
+}
+
+// testMetrics creates a fresh *metrics.Metrics registered with reg.
+func testMetrics(t *testing.T, reg *prometheus.Registry) *metrics.Metrics {
+	t.Helper()
+
+	m, err := metrics.Register(reg)
+	if err != nil {
+		t.Fatalf("metrics.Register() error: %v", err)
+	}
+
+	return m
+}
+
+// chiWithMetrics returns a chi.Mux with only the Metrics middleware applied.
+func chiWithMetrics(m *metrics.Metrics) *chi.Mux {
+	r := chi.NewRouter()
+	r.Use(Metrics(m))
+	return r
+}
+
+// counterValue reads the value of a counter metric with the given labels.
+func counterValue(t *testing.T, reg *prometheus.Registry, name, method, path, status string) float64 {
+	t.Helper()
+
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error: %v", err)
+	}
+
+	for _, fam := range families {
+		if fam.GetName() != name {
+			continue
+		}
+
+		for _, metric := range fam.GetMetric() {
+			labels := map[string]string{}
+			for _, l := range metric.GetLabel() {
+				labels[l.GetName()] = l.GetValue()
+			}
+
+			if labels["method"] == method && labels["path"] == path && labels["status"] == status {
+				return metric.GetCounter().GetValue()
+			}
+		}
+	}
+
+	t.Fatalf("counter %s{method=%q,path=%q,status=%q} not found", name, method, path, status)
+	return 0
+}
+
+// gaugeValue reads the current value of a gauge metric.
+func gaugeValue(t *testing.T, reg *prometheus.Registry, name string) float64 {
+	t.Helper()
+
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error: %v", err)
+	}
+
+	for _, fam := range families {
+		if fam.GetName() != name {
+			continue
+		}
+
+		metrics := fam.GetMetric()
+		if len(metrics) > 0 {
+			return metrics[0].GetGauge().GetValue()
+		}
+	}
+
+	t.Fatalf("gauge %s not found", name)
+	return 0
 }

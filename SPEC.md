@@ -110,21 +110,25 @@ Every endpoint returns a consistent JSON envelope regardless of success or failu
 
 All handlers write this envelope via the shared `api/internal/response` package (`response.Write`).
 
+**Middleware stack:** RequestID → Recovery → Logger → Metrics (Prometheus) → Auth (on `/api/v1/` only). See `api/specs/backend.md` for implementation details.
+
 **Endpoints:**
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/vulns` | List/filter vulnerabilities. Query params: `source`, `min_cvss`, `max_cvss`, `since`, `until`, `scored` |
-| `GET` | `/api/v1/vulns?cve_id={id}` | Look up a vulnerability by canonical ID. Also accepts `ghsa_id` or `edb_id`. Returns a single object or 404. Because `cve_id`, `ghsa_id`, and `edb_id` are `UNIQUE` in the database, these params are point lookups, not list filters — the response is a single vulnerability object, not a list. |
-| `GET` | `/api/v1/vulns/{id}` | Single vulnerability detail |
-| `POST` | `/api/v1/vulns` | Ingest a new vulnerability record (used by ingestion service) |
-| `PUT` | `/api/v1/vulns/{id}` | Update an existing vulnerability record |
-| `GET` | `/api/v1/vulns/{id}/scores` | Retrieve scoring results for a vulnerability |
-| `POST` | `/api/v1/vulns/{id}/scores` | Submit a scoring result (used by scoring service) |
-| `GET` | `/api/v1/runs/ingestion` | List ingestion run logs |
-| `POST` | `/api/v1/runs/ingestion` | Record a completed ingestion run (used by ingestion service) |
-| `GET` | `/api/v1/runs/newsletter` | List newsletter run logs |
-| `POST` | `/api/v1/runs/newsletter` | Record a completed newsletter run |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | Public | Readiness check (Docker Compose health probe) |
+| `GET` | `/metrics` | Public | Prometheus scrape endpoint |
+| `GET` | `/api/v1/vulns` | Internal | List/filter vulnerabilities. Query params: `source`, `min_cvss`, `max_cvss`, `since`, `until`, `scored` |
+| `GET` | `/api/v1/vulns?cve_id={id}` | Internal | Look up a vulnerability by canonical ID. Also accepts `ghsa_id` or `edb_id`. Returns a single object or 404. Because `cve_id`, `ghsa_id`, and `edb_id` are `UNIQUE` in the database, these params are point lookups, not list filters — the response is a single vulnerability object, not a list. |
+| `GET` | `/api/v1/vulns/{id}` | Internal | Single vulnerability detail |
+| `POST` | `/api/v1/vulns` | Internal | Ingest a new vulnerability record (used by ingestion service) |
+| `PUT` | `/api/v1/vulns/{id}` | Internal | Update an existing vulnerability record |
+| `GET` | `/api/v1/vulns/{id}/scores` | Internal | Retrieve scoring results for a vulnerability |
+| `POST` | `/api/v1/vulns/{id}/scores` | Internal | Submit a scoring result (used by scoring service) |
+| `GET` | `/api/v1/runs/ingestion` | Internal | List ingestion run logs |
+| `POST` | `/api/v1/runs/ingestion` | Internal | Record a completed ingestion run (used by ingestion service) |
+| `GET` | `/api/v1/runs/newsletter` | Internal | List newsletter run logs |
+| `POST` | `/api/v1/runs/newsletter` | Internal | Record a completed newsletter run |
 
 ---
 
@@ -177,7 +181,7 @@ Email delivery is gated by `delivery.email.enabled` and only runs when at least 
 
 ## 4. Data Model
 
-All tables are managed via versioned migrations using `golang-migrate`. The migration files live in `db/migrations/` and are embedded in the API service binary.
+All tables are managed via versioned migrations using `golang-migrate`. The migration files live in `api/internal/postgres/migrations/` and are embedded in the API service binary via `//go:embed`.
 
 ```sql
 -- Canonical vulnerability records
@@ -389,7 +393,7 @@ The following are explicitly out of scope for the initial version:
 
 ---
 
-## 9. Future Considerations
+## 10. Future Considerations
 
 | Feature | Notes |
 |---------|-------|

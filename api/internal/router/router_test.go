@@ -11,7 +11,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+
+	"daily-patch/api/internal/metrics"
 )
 
 // -----------------------------------------------------------------------------
@@ -23,39 +28,6 @@ const (
 	headerInternalSecret = "X-Internal-Secret"
 	headerRequestID      = "X-Request-ID"
 )
-
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
-func newRouter() http.Handler {
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError + 10}))
-	return New(nil, nil, nil, testSecret, log)
-}
-
-func do(h http.Handler, method, path, secret string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, nil)
-	if secret != "" {
-		req.Header.Set(headerInternalSecret, secret)
-	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	return rec
-}
-
-type envelope struct {
-	Error      string `json:"error"`
-	StatusCode int    `json:"statusCode"`
-}
-
-func decodeEnvelope(t *testing.T, rec *httptest.ResponseRecorder) envelope {
-	t.Helper()
-	var env envelope
-	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	return env
-}
 
 // -----------------------------------------------------------------------------
 // /health — public, no auth required
@@ -182,4 +154,84 @@ func TestUnknownRoute_NotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
+}
+
+// -----------------------------------------------------------------------------
+// /metrics — public, Prometheus scrape endpoint
+// -----------------------------------------------------------------------------
+
+func TestMetrics_Endpoint_OK(t *testing.T) {
+	rec := do(newRouterWithMetrics(t), http.MethodGet, "/metrics", "")
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+}
+
+func TestMetrics_NoAuthRequired(t *testing.T) {
+	rec := do(newRouterWithMetrics(t), http.MethodGet, "/metrics", "")
+	if rec.Code == http.StatusUnauthorized {
+		t.Error("/metrics should not require auth")
+	}
+}
+
+func TestMetrics_ContentType(t *testing.T) {
+	rec := do(newRouterWithMetrics(t), http.MethodGet, "/metrics", "")
+	ct := rec.Header().Get("Content-Type")
+	if !strings.Contains(ct, "text/plain") && !strings.Contains(ct, "text/openmetrics") {
+		t.Errorf("Content-Type = %q, want text/plain or openmetrics", ct)
+	}
+}
+
+func TestMetrics_NilGatherer_NoEndpoint(t *testing.T) {
+	// When no gatherer is provided, /metrics should not be registered.
+	rec := do(newRouter(), http.MethodGet, "/metrics", "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 when gatherer is nil", rec.Code)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Test helpers
+// -----------------------------------------------------------------------------
+
+func newRouter() http.Handler {
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError + 10}))
+	return New(nil, nil, nil, nil, nil, testSecret, log)
+}
+
+func newRouterWithMetrics(t *testing.T) http.Handler {
+	t.Helper()
+
+	reg := prometheus.NewRegistry()
+	m, err := metrics.Register(reg)
+	if err != nil {
+		t.Fatalf("metrics.Register() error: %v", err)
+	}
+
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError + 10}))
+	return New(nil, nil, nil, m, reg, testSecret, log)
+}
+
+func do(h http.Handler, method, path, secret string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, nil)
+	if secret != "" {
+		req.Header.Set(headerInternalSecret, secret)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+type envelope struct {
+	Error      string `json:"error"`
+	StatusCode int    `json:"statusCode"`
+}
+
+func decodeEnvelope(t *testing.T, rec *httptest.ResponseRecorder) envelope {
+	t.Helper()
+	var env envelope
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	return env
 }

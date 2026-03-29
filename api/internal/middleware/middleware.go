@@ -13,8 +13,12 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
+	"daily-patch/api/internal/metrics"
 	"daily-patch/api/internal/response"
 )
 
@@ -127,12 +131,31 @@ func Logger(log *slog.Logger) func(http.Handler) http.Handler {
 }
 
 // Metrics records Prometheus request count, duration, and in-flight gauge.
-// Relies on vars registered via metrics.Register before the server starts.
-// No-op until the metrics package is wired in a follow-on iteration.
-func Metrics() func(http.Handler) http.Handler {
+// When m is nil the middleware is a pass-through no-op, which preserves
+// backward compatibility for tests that do not need metrics.
+func Metrics(m *metrics.Metrics) func(http.Handler) http.Handler {
+	if m == nil {
+		return func(next http.Handler) http.Handler {
+			return next
+		}
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, r)
+			m.InFlight.Inc()
+			defer m.InFlight.Dec()
+
+			start := time.Now()
+			ww := newWrapped(w)
+
+			next.ServeHTTP(ww, r)
+
+			// chi resolves the route pattern during ServeHTTP, so we
+			// read it after the handler returns.
+			pattern := chi.RouteContext(r.Context()).RoutePattern()
+
+			m.Requests.WithLabelValues(r.Method, pattern, strconv.Itoa(ww.status)).Inc()
+			m.Duration.WithLabelValues(r.Method, pattern).Observe(time.Since(start).Seconds())
 		})
 	}
 }

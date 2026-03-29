@@ -20,8 +20,10 @@ import (
 	"time"
 
 	"github.com/akamensky/argparse"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"daily-patch/api/internal/config"
+	"daily-patch/api/internal/metrics"
 	"daily-patch/api/internal/postgres"
 	"daily-patch/api/internal/router"
 )
@@ -65,9 +67,12 @@ Environment variables:
 // This is used exclusively by tests to wait for the server to be ready before
 // issuing requests. When skipDB is true, database initialization is skipped
 // so that unit tests can exercise the server without a running PostgreSQL.
+// The registry field lets tests inject their own prometheus.Registry to avoid
+// double-registration against the global default.
 type runOpts struct {
-	ready  chan<- net.Addr
-	skipDB bool
+	ready    chan<- net.Addr
+	skipDB   bool
+	registry *prometheus.Registry
 }
 
 // -----------------------------------------------------------------------------
@@ -131,10 +136,24 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, opts *run
 		defer pool.Close()
 	}
 
+	// --- Metrics -------------------------------------------------------------
+	// Register Prometheus collectors. Tests inject their own registry to
+	// avoid double-registration against the global default.
+	reg := prometheus.DefaultRegisterer.(*prometheus.Registry)
+	if opts != nil && opts.registry != nil {
+		reg = opts.registry
+	}
+
+	m, err := metrics.Register(reg)
+	if err != nil {
+		return fmt.Errorf("metrics: %w", err)
+	}
+	log.Info("prometheus metrics registered")
+
 	// --- Router --------------------------------------------------------------
 	// Store parameters are nil until the store implementations are wired.
 	// The router still registers all routes; unimplemented handlers return 501.
-	h := router.New(nil, nil, nil, cfg.API.InternalSecret, log)
+	h := router.New(nil, nil, nil, m, reg, cfg.API.InternalSecret, log)
 	log.Info("router initialized, all routes registered")
 
 	// --- Listener & server ---------------------------------------------------

@@ -34,6 +34,7 @@ api/
       run.go                       # GET/POST /api/v1/runs/{ingestion,newsletter} (501 stubs)
     response/response.go           # Write(w, status, errType, detail, result)
     router/router.go               # chi mux, route registration, sub-router mounting
+    metrics/metrics.go             # Prometheus metric registration and collector struct
 ```
 
 **Planned:**
@@ -45,7 +46,6 @@ api/
         vuln.go                    # pgx implementation of VulnStore
         score.go                   # pgx implementation of ScoreStore
         run.go                     # pgx implementation of RunStore
-    metrics/metrics.go             # Prometheus metric registrations
 ```
 
 **Rationale:**
@@ -255,13 +255,23 @@ defined in §8 are written to the response.
 
 ## 5. Metrics (`internal/metrics`)
 
-Package-level Prometheus variables. `Register` is called once at startup with
-the default Prometheus registerer (or a custom one in tests).
+`Register` creates the three Prometheus collectors and registers them with the
+provided registerer. It returns a `*Metrics` struct that is passed to the
+`Metrics()` middleware for instrumentation. Tests inject their own
+`prometheus.NewRegistry()` to avoid double-registration against the global
+default.
 
 ```go
-// Register registers all API metrics with reg. Returns an error if any metric
-// fails to register (e.g. duplicate registration in tests).
-func Register(reg prometheus.Registerer) error
+// Metrics holds the three Prometheus collectors used by the HTTP middleware.
+type Metrics struct {
+    Requests *prometheus.CounterVec
+    Duration *prometheus.HistogramVec
+    InFlight prometheus.Gauge
+}
+
+// Register creates and registers the three collectors with reg. Returns an
+// error if any collector is already registered (e.g. double registration).
+func Register(reg prometheus.Registerer) (*Metrics, error)
 ```
 
 | Metric | Type | Labels |
@@ -300,8 +310,11 @@ func Recovery(log *slog.Logger) func(http.Handler) http.Handler
 func Logger(log *slog.Logger) func(http.Handler) http.Handler
 
 // Metrics records request count (with status label), duration histogram, and
-// in-flight gauge using the vars registered by metrics.Register.
-func Metrics() func(http.Handler) http.Handler
+// in-flight gauge. When m is nil the middleware is a no-op pass-through,
+// preserving backward compatibility for tests that do not need metrics.
+// The path label uses chi.RouteContext().RoutePattern() (read after
+// next.ServeHTTP returns) for low-cardinality route grouping.
+func Metrics(m *metrics.Metrics) func(http.Handler) http.Handler
 
 // Auth validates the X-Internal-Secret header. Responds 401 with error code
 // "unauthorized" if the header is absent or does not match secret.
@@ -343,13 +356,16 @@ const requestIDKey contextKey = iota
 
 ```go
 // New wires a chi mux with all middleware and routes. The returned handler
-// is passed directly to http.Server.
+// is passed directly to http.Server. When m is nil, the Metrics middleware
+// is a no-op and /metrics is not registered.
 func New(
-    vulns  store.VulnStore,
-    scores store.ScoreStore,
-    runs   store.RunStore,
-    secret string,
-    log    *slog.Logger,
+    vulns    store.VulnStore,
+    scores   store.ScoreStore,
+    runs     store.RunStore,
+    m        *metrics.Metrics,
+    gatherer prometheus.Gatherer,
+    secret   string,
+    log      *slog.Logger,
 ) http.Handler
 ```
 
@@ -378,7 +394,7 @@ func GetVuln(vulns store.VulnStore) http.HandlerFunc {
 | Method | Pattern | Handler |
 |--------|---------|---------|
 | `GET` | `/health` | `handler.Health` |
-| `GET` | `/metrics` | `promhttp.Handler()` |
+| `GET` | `/metrics` | `promhttp.HandlerFor(gatherer, ...)` |
 | `GET` | `/api/v1/vulns` | `handler.ListVulns(vulns)` |
 | `GET` | `/api/v1/vulns/{id}` | `handler.GetVuln(vulns)` |
 | `POST` | `/api/v1/vulns` | `handler.CreateVuln(vulns)` |
@@ -480,8 +496,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer,
 
 ```go
 type runOpts struct {
-    ready  chan<- net.Addr // receives listen address once serving (test sync)
-    skipDB bool           // when true, skip postgres.New() (unit tests)
+    ready    chan<- net.Addr      // receives listen address once serving (test sync)
+    skipDB   bool                // when true, skip postgres.New() (unit tests)
+    registry *prometheus.Registry // custom registry (test isolation, avoids global)
 }
 ```
 
@@ -496,8 +513,15 @@ log := slog.New(slog.NewJSONHandler(stdout, nil))
 pool, err := postgres.New(ctx, cfg.Database.DSN, log)
 defer pool.Close()
 
+// Metrics — tests inject opts.registry; production uses DefaultRegisterer
+reg := prometheus.DefaultRegisterer.(*prometheus.Registry)
+if opts != nil && opts.registry != nil {
+    reg = opts.registry
+}
+m, err := metrics.Register(reg)
+
 // Store implementations (nil until postgres store package exists)
-h := router.New(nil, nil, nil, cfg.API.InternalSecret, log)
+h := router.New(nil, nil, nil, m, reg, cfg.API.InternalSecret, log)
 
 srv, ln, err := startListener(cfg.API.Listen, h, log) // net.Listen("tcp", ...)
 // notify tests via opts.ready
@@ -544,13 +568,13 @@ daily-patch/api/internal/middleware
 daily-patch/api/internal/handler
 daily-patch/api/internal/response
 daily-patch/api/internal/router
+daily-patch/api/internal/metrics
 ```
 
 **Planned:**
 
 ```
 daily-patch/api/internal/store/postgres
-daily-patch/api/internal/metrics
 ```
 
 **External dependencies in `go.mod`:**
@@ -562,7 +586,7 @@ daily-patch/api/internal/metrics
 | `github.com/jackc/pgx/v5` | PostgreSQL driver and connection pool | In use |
 | `github.com/golang-migrate/migrate/v4` | Embedded database migrations | In use |
 | `gopkg.in/yaml.v3` | YAML config parsing | In use |
-| `github.com/prometheus/client_golang` | Prometheus metrics | Planned |
+| `github.com/prometheus/client_golang` | Prometheus metrics | In use |
 
 ---
 
@@ -577,8 +601,6 @@ subsequent issues:
   body schema will mirror `IngestionRun` once the run-tracking API is
   finalized. `RecordRun` and `LastSuccessfulRun` in the ingestion service's
   API client are currently stubbed with `panic("not implemented")`.
-- **Prometheus metrics** — `internal/metrics/` package and `/metrics` endpoint
-  are not yet implemented. The `Metrics()` middleware is a no-op placeholder.
 - **Store implementations** — `internal/store/postgres/` with concrete
   `VulnStore`, `ScoreStore`, and `RunStore` backed by pgx queries. Handlers
   currently receive `nil` stores and return 501.
